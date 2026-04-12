@@ -205,3 +205,40 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+
+# --- Django ---
+db.sqlite3
+db.sqlite3-journal
+media/
+staticfiles/
+
+# --- Base de Datos (Docker) ---
+postgres_data/
+
+# --- Variables de Entorno ---
+.env
+
+# --- Sistema y IDEs ---
+.DS_Store
+.vscode/
+.idea/
+
+# --- Docker & DB Extras ---
+*.db
+*.sqlite3
+.docker/
+
+*.sql
+# Logs de los contenedores
+docker-compose.override.yml
+
+# --- Windows System Files ---
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# --- VS Code / Cursor ---
+.vscode/
+.history/
+*.code-workspace

@@ -8,6 +8,15 @@ class ContentBlockType(models.TextChoices):
     VIDEO = 'video', 'Video'
     AUDIO = 'audio', 'Audio'
 
+class Tag(models.Model):
+    name = models.CharField(max_length=50, unique=True)    
+
+    def __str__(self):
+        return f"#{self.name}"
+
+    class Meta:
+        ordering = ['-use_count'] # Las más usadas primero
+
 class Post(models.Model):
     id = models.BigIntegerField(
         primary_key=True,
@@ -40,6 +49,11 @@ class Post(models.Model):
         default=0,
         verbose_name="Comments"
     )
+    tags = models.ManyToManyField(
+        Tag,
+        related_name='posts',
+        blank=True
+    ) 
 
     class Meta:
         ordering = ['-timestamp']

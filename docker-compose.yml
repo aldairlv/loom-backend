@@ -15,11 +15,20 @@ services:
       timeout: 5s
       retries: 5
 
+# NUEVO SERVICIO: ChromaDB
+  chroma:
+    image: chromadb/chroma:latest
+    volumes:
+      - chroma_data:/chroma/chroma  # Persistencia de los embeddings
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+
   web:
-    build: .
+    build: ./core_api
     command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
     volumes:
-      - .:/app
+      - ./core_api:/app
     ports:
       - "8000:8000"
     env_file:
@@ -27,6 +36,33 @@ services:
     depends_on:
       db:
         condition: service_healthy
+# INFRAESTRUCTURA APISIX
+  etcd:
+    image: bitnamilegacy/etcd:3.5
+    environment:
+      - ALLOW_NONE_AUTHENTICATION=yes
+      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd:2379
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:2379
+
+  apisix:
+    image: apache/apisix:latest
+    volumes:
+      - ./apisix_conf/config.yaml:/usr/local/apisix/conf/config.yaml
+    depends_on:
+      - etcd
+    ports:
+      - "9080:9080" # Tu nueva BACKEND_URL usará este puerto
+      - "9180:9180" # Admin API para curl
+
+  apisix-dashboard:
+    image: apache/apisix-dashboard:latest
+    volumes:
+      - ./apisix_conf/dashboard_conf.yaml:/usr/local/apisix-dashboard/conf/conf.yaml:ro
+    ports:
+      - "9000:9000" # Acceso visual: http://localhost:9000
+    depends_on:
+      - etcd
 
 volumes:
   postgres_data:
+  chroma_data:

@@ -242,3 +242,11 @@ Desktop.ini
 .vscode/
 .history/
 *.code-workspace
+
+
+# --- APISIX Configuration ---
+apisix_conf/config.yaml
+apisix_conf/
+
+# media content
+sample_images/

@@ -1,5 +1,5 @@
 # 1. Imagen base
-FROM python:3.11-slim
+FROM python:3.13-slim
 
 # 2. Optimización de Python
 ENV PYTHONDONTWRITEBYTECODE 1

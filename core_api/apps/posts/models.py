@@ -14,14 +14,11 @@ class Tag(models.Model):
     def __str__(self):
         return f"#{self.name}"
 
-    class Meta:
-        ordering = ['-use_count'] # Las más usadas primero
-
 class Post(models.Model):
     id = models.BigIntegerField(
         primary_key=True,
     )
-    blog = models.ForeignKey(
+    blogId = models.ForeignKey(
         Blog,
         on_delete=models.CASCADE,
         related_name='posts',
@@ -59,7 +56,7 @@ class Post(models.Model):
         ordering = ['-timestamp']
         indexes = [
             models.Index(fields=['-timestamp']),
-            models.Index(fields=['blog', '-timestamp']),
+            models.Index(fields=['blogId', '-timestamp']),
         ]
 
     def __str__(self):

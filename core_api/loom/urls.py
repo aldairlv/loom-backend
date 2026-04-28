@@ -16,8 +16,14 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import include, path
+from django.conf import settings  # Importación correcta de settings
+from django.conf.urls.static import static # La pieza que te faltaba
 
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('v1/', include ('api.urls_v1'))
-]
+] 
+
+# Solo añade esto si estás en modo DEBUG (desarrollo)
+if settings.DEBUG:
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

@@ -11,11 +11,12 @@ https://docs.djangoproject.com/en/6.0/ref/settings/
 """
 
 from pathlib import Path
-import os 
+import os
+import sys 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
+sys.path.insert(0, os.path.join(BASE_DIR, 'apps'))
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.0/howto/deployment/checklist/
@@ -42,6 +43,8 @@ INSTALLED_APPS = [
     'accounts',
     'blogs',
     'posts',
+    'rest_framework',
+    'feed_engine',
 ]
 
 MIDDLEWARE = [
@@ -54,7 +57,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-ROOT_URLCONF = 'core.urls'
+
 
 TEMPLATES = [
     {
@@ -70,9 +73,10 @@ TEMPLATES = [
         },
     },
 ]
-
-WSGI_APPLICATION = 'core.wsgi.application'
-
+#ROOT_URLCONF = 'core.urls'
+#WSGI_APPLICATION = 'core.wsgi.application'
+ROOT_URLCONF = 'loom.urls'
+WSGI_APPLICATION = 'loom.wsgi.application'
 
 # Database
 # https://docs.djangoproject.com/en/6.0/ref/settings/#databases
@@ -129,3 +133,6 @@ STATIC_URL = 'static/'
 AUTH_USER_MODEL = 'accounts.User'  # Indica que usaremos nuestro modelo de usuario personalizado
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+MEDIA_URL = '/media/'
+MEDIA_ROOT = BASE_DIR / 'media'

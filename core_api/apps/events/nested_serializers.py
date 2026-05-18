@@ -73,10 +73,12 @@ class EventFeedSerializer(serializers.ModelSerializer):
     event_data = serializers.SerializerMethodField()
     # We need to prefetch attendees to implement friends_attending logic
     friends_attending = serializers.SerializerMethodField()
+    # Campo para mostrar la distancia al evento
+    distance = serializers.SerializerMethodField()
 
     class Meta:
         model = Event
-        fields = ['id', 'type', 'timestamp', 'tags', 'creator', 'event_data', 'friends_attending']
+        fields = ['id', 'type', 'timestamp', 'tags', 'creator', 'event_data', 'friends_attending', 'distance']
 
     @extend_schema_field(serializers.IntegerField)
     def get_timestamp(self, obj: Event) -> int:
@@ -102,6 +104,40 @@ class EventFeedSerializer(serializers.ModelSerializer):
 
     @extend_schema_field(FriendsAttendingSerializer(many=True))
     def get_friends_attending(self, obj: Event) -> list:
-        # Placeholder logic: This needs to be implemented based on your "friends" relationship model.
-        # For now, it returns an empty list as requested in the example.
-        return []
+        """
+        Calcula y devuelve una lista de amigos (seguimiento mutuo) del usuario actual
+        que también asisten a este evento.
+        """
+        request = self.context.get('request')
+        if not request or not request.user.is_authenticated:
+            return []
+
+        try:
+            user_profile = request.user.profile
+        except Profile.DoesNotExist:
+            return []
+
+        # 1. Obtiene los IDs de los perfiles que el usuario actual sigue.
+        following_ids = user_profile.following_relationships.values_list('to_profile_id', flat=True)
+        
+        # 2. Obtiene los IDs de los perfiles que siguen al usuario actual (sus seguidores).
+        follower_ids = user_profile.follower_relationships.values_list('from_profile_id', flat=True)
+
+        # 3. Filtra los asistentes al evento para encontrar aquellos que están en ambas listas (amigos).
+        friends_attending = obj.attendees.filter(id__in=following_ids).filter(id__in=follower_ids)
+        
+        return FriendsAttendingSerializer(friends_attending, many=True, context=self.context).data
+
+    @extend_schema_field(serializers.CharField)
+    def get_distance(self, obj: Event) -> str | None:
+        """
+        Devuelve la distancia al evento si se ha calculado.
+        El valor viene en metros desde la base de datos, lo convertimos a km.
+        """
+        # El campo 'distance' es anotado en el queryset por EventService.filter_events
+        if hasattr(obj, 'distance') and obj.distance is not None:
+            # obj.distance es un objeto Distance de GeoDjango, obtenemos los metros
+            meters = obj.distance.m
+            km = meters / 1000
+            return f"{km:.1f} km"
+        return None

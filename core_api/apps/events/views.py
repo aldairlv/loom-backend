@@ -90,16 +90,43 @@ class EventViewSet(viewsets.ModelViewSet):
         logger.info(f"Serialización completada. Número de elementos serializados: {len(serializer.data)}")
 
         # Build the transparent queryParams object
+        raw_radius = request.query_params.get('radius')
+        try:
+            effective_radius = float(raw_radius) if raw_radius is not None else services.EventService.DEFAULT_RADIUS_KM
+        except (TypeError, ValueError):
+            effective_radius = services.EventService.DEFAULT_RADIUS_KM
+
+        effective_anywhere = request.query_params.get('anywhere', 'false').lower() == 'true'
+        effective_anytime = request.query_params.get('anytime', 'false').lower() == 'true'
+
+        effective_lat = request.query_params.get('lat')
+        effective_lng = request.query_params.get('lng')
+        try:
+            effective_lat = float(effective_lat) if effective_lat is not None else None
+            effective_lng = float(effective_lng) if effective_lng is not None else None
+        except (TypeError, ValueError):
+            effective_lat = None
+            effective_lng = None
+
+        if not effective_anywhere and (effective_lat is None or effective_lng is None):
+            try:
+                user_profile = request.user.profile
+            except Profile.DoesNotExist:
+                user_profile = None
+            if user_profile and user_profile.location:
+                effective_lat = user_profile.location.y
+                effective_lng = user_profile.location.x
+
         active_filters = {
-            'radius': request.query_params.get('radius', 15), # Default value
-            'lat': request.query_params.get('lat'),
-            'lng': request.query_params.get('lng'),
+            'radius': effective_radius,
+            'lat': effective_lat,
+            'lng': effective_lng,
             'date': request.query_params.get('date'),
             'start_date': request.query_params.get('start_date'),
             'end_date': request.query_params.get('end_date'),
             'category': request.query_params.get('category'),
-            'anywhere': request.query_params.get('anywhere', 'false').lower() == 'true',
-            'anytime': request.query_params.get('anytime', 'false').lower() == 'true',
+            'anywhere': effective_anywhere,
+            'anytime': effective_anytime,
             'limit': self.pagination_class.page_size
         }
 

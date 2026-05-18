@@ -9,6 +9,7 @@ urlpatterns = [
     path('profiles/', include('profiles.urls')),
     path('interactions/', include('interactions.urls')),
     path('events/', include('events.urls')), # Nueva ruta para eventos
+    path('relationships/', include('relationships.urls')),
 
     # Rutas de autenticación automática
     path('auth/', include('dj_rest_auth.urls')),

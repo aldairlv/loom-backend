@@ -9,6 +9,7 @@ from django.utils.text import slugify
 from django.utils import timezone
 from django.contrib.gis.geos import Point
 from django.contrib.gis.db.models.functions import Distance
+from django.contrib.gis.measure import D  # Importamos D para manejar distancias
 
 from profiles.models import Profile
 from posts.models import Tag # Assuming Tag model is in posts app
@@ -17,6 +18,8 @@ from .models import Event, EventStatus, EventCategory
 logger = logging.getLogger(__name__)
 
 class EventService:
+    DEFAULT_RADIUS_KM = 30
+
     @staticmethod
     def get_event_queryset() -> QuerySet[Event]:
         """
@@ -165,17 +168,27 @@ class EventService:
         """
         Aplica filtros inteligentes a la lista de eventos.
         """
-        logger.info("--- Iniciando EventService.filter_events ---")
-        queryset = EventService.get_public_and_user_events(user_profile)
-        logger.info(f"Paso 0: Queryset inicial (públicos + del usuario). Total: {queryset.count()} eventos.")
+        print("--- Iniciando EventService.filter_events ---")
+        # Modificación: Partimos de un queryset que ya filtra por 'SCHEDULED'
+        base_queryset = EventService.get_public_and_user_events(user_profile)
+        queryset = base_queryset.filter(
+            status=EventStatus.SCHEDULED
+        )
+        print(f"Paso 0: Queryset inicial (públicos + del usuario, 'SCHEDULED'). Total: {queryset.count()} eventos.")
 
         # 1. Filtro de Geolocalización
         lat = params.get('lat')
-        logger.info(f"Filtro Geo: Procesando lat={lat}, lng={params.get('lng')}, radius={params.get('radius')}, anywhere={params.get('anywhere')}")
+        print(f"Filtro Geo: Procesando lat={lat}, lng={params.get('lng')}, radius={params.get('radius')}, anywhere={params.get('anywhere')}")
         lng = params.get('lng')
-        radius = params.get('radius', 15)  # Radio por defecto de 15 km
+        radius = params.get('radius', EventService.DEFAULT_RADIUS_KM)  # Radio por defecto de 30 km
         anywhere = params.get('anywhere', 'false').lower() == 'true'
         
+        try:
+            radius = float(radius)
+        except (TypeError, ValueError):
+            print(f"ADVERTENCIA: Radio inválido recibido: radius={params.get('radius')}. Usando valor por defecto 30 km.")
+            radius = 30.0
+
         ref_point = None
         order_by_distance = False
         if not anywhere:
@@ -183,48 +196,61 @@ class EventService:
                 try:
                     ref_point = Point(float(lng), float(lat), srid=4326)
                 except (ValueError, TypeError):
-                    logger.warning(f"Coordenadas inválidas recibidas: lat={lat}, lng={lng}")
+                    print(f"ADVERTENCIA: Coordenadas inválidas recibidas: lat={lat}, lng={lng}")
                     pass # Ignore if coordinates are invalid
             elif user_profile and user_profile.location:
                 ref_point = user_profile.location
-                logger.info("Filtro Geo: Usando localización del perfil de usuario.")
+                print("Filtro Geo: Usando localización del perfil de usuario.")
 
-            logger.info(f"Filtro Geo: Punto de referencia para búsqueda: {ref_point}")
             if ref_point:
-                # Filter by distance and annotate for ordering
-                queryset = queryset.filter(
-                    location__dwithin=(ref_point, float(radius) * 1000) # dwithin espera metros
-                ).annotate(
-                    distance=Distance('location', ref_point)
-                )
-                order_by_distance = True
+                print(f"Filtro Geo: Punto de referencia encontrado: {ref_point}. Aplicando filtro de radio de {radius} km.")
+                try:
+                    queryset = queryset.filter(
+                        location__distance_lte=(ref_point, D(km=radius))
+                    ).annotate(
+                        distance=Distance('location', ref_point)
+                    ).order_by('distance')
+                    order_by_distance = True
+                except Exception as exc:
+                    print(f"ERROR: No se pudo aplicar el filtro de distancia. Detalles: {exc}")
+                    queryset = queryset.none()
+            else:
+                # Si no hay punto de referencia (ni en params ni en perfil), y no es 'anywhere',
+                # no devolvemos ningún resultado geolocalizado.
+                print("Filtro Geo: No hay punto de referencia y 'anywhere' es false. No se devuelven eventos.")
+                queryset = queryset.none()
         else:
-            logger.info("Filtro Geo: 'anywhere' es true, se omiten filtros de localización.")
+            print("Filtro Geo: 'anywhere' es true, se omiten filtros de localización.")
         # If no reference point is found and 'anywhere' is not true, no location filter is applied.
-        logger.info(f"Paso 1: Después de filtro de geolocalización. Total: {queryset.count()} eventos.")
+        print(f"Paso 1: Después de filtro de geolocalización. Total: {queryset.count()} eventos.")
 
         # 2. Filtro Temporal
         anytime = params.get('anytime', 'false').lower() == 'true'
         date_filter = params.get('date')
         start_date = params.get('start_date')
         end_date = params.get('end_date')
-        logger.info(f"Filtro Temporal: Procesando anytime={anytime}, date={date_filter}, start_date={start_date}, end_date={end_date}")
+        print(f"Filtro Temporal: Procesando anytime={anytime}, date={date_filter}, start_date={start_date}, end_date={end_date}")
 
         
         now = timezone.now()
         
         if not anytime:
-            if date_filter:
+            if date_filter == 'soon':
+                print("Filtro Temporal: Aplicando filtro 'soon' (activos o futuros).")
+                queryset = queryset.filter(
+                    Q(end_time__gte=now) | Q(end_time__isnull=True, start_time__gte=now)
+                )
+            elif date_filter:
                 today = now.date()
                 if date_filter == 'today':
-                    logger.info("Filtro Temporal: Aplicando filtro 'today'.")
+                    print("Filtro Temporal: Aplicando filtro 'today'.")
                     queryset = queryset.filter(start_time__date=today)
                 elif date_filter == 'tomorrow':
-                    logger.info("Filtro Temporal: Aplicando filtro 'tomorrow'.")
+                    print("Filtro Temporal: Aplicando filtro 'tomorrow'.")
                     tomorrow = today + timedelta(days=1)
                     queryset = queryset.filter(start_time__date=tomorrow)
                 elif date_filter == 'weekend':
-                    logger.info("Filtro Temporal: Aplicando filtro 'weekend'.")
+                    print("Filtro Temporal: Aplicando filtro 'weekend'.")
                     # Próximo Sábado (5) y Domingo (6)
                     days_until_saturday = (5 - today.weekday() + 7) % 7
                     saturday = today + timedelta(days=days_until_saturday)
@@ -232,7 +258,7 @@ class EventService:
                     queryset = queryset.filter(start_time__date__in=[saturday, sunday])
             
             elif start_date and end_date:
-                logger.info(f"Filtro Temporal: Aplicando rango de fechas: {start_date} a {end_date}.")
+                print(f"Filtro Temporal: Aplicando rango de fechas: {start_date} a {end_date}.")
                 queryset = queryset.filter(start_time__date__gte=start_date, end_time__date__lte=end_date)
             elif start_date:
                 queryset = queryset.filter(start_time__date=start_date)
@@ -241,38 +267,37 @@ class EventService:
                 queryset = queryset.filter(end_time__date__lte=end_date, end_time__gte=now)
             else:
                 # Comportamiento por defecto: eventos activos o futuros
-                logger.info("Filtro Temporal: Aplicando filtro por defecto (eventos activos o futuros).")
+                print("Filtro Temporal: Aplicando filtro por defecto (eventos activos o futuros).")
                 # Un evento está activo si su `end_time` es futuro. Si no tiene `end_time`, consideramos `start_time`.
                 queryset = queryset.filter(
                     Q(end_time__gte=now) | Q(end_time__isnull=True, start_time__gte=now)
                 )
         else:
-            logger.info("Filtro Temporal: 'anytime' es true, se omiten filtros de fecha.")
-        logger.info(f"Paso 2: Después de filtro temporal. Total: {queryset.count()} eventos.")
+            print("Filtro Temporal: 'anytime' es true, se omiten filtros de fecha.")
+        print(f"Paso 2: Después de filtro temporal. Total: {queryset.count()} eventos.")
 
-        # Order by distance if applicable, otherwise by start time
-        if order_by_distance:
-            logger.info("Ordenando por distancia.")
-            queryset = queryset.order_by('distance')
-        else:
-            logger.info("Ordenando por fecha de inicio.")
-            queryset = queryset.order_by('start_time')
+        # Si no se ordenó por distancia, se mantiene el orden por defecto por fecha de inicio.
+        # El `order_by('distance')` anterior sobreescribe cualquier ordenación previa.
+        if not order_by_distance:
+            print("Ordenando por fecha de inicio.")
+            # Re-aplicamos el orden por si se perdió en algún `distinct()`
+            queryset = queryset.order_by('start_time') # Mantener el orden por defecto
 
         # 3. Filtro por Tags/Categoría
         tags_query = params.get('tags') or params.get('category')
         if tags_query:
             tag_names = [tag.strip() for tag in tags_query.split(',')]
-            logger.info(f"Filtro Tags: Aplicando filtro por tags: {tag_names}")
+            print(f"Filtro Tags: Aplicando filtro por tags: {tag_names}")
             queryset = queryset.filter(tags__name__in=tag_names).distinct()
-            logger.info(f"Paso 3.1: Después de filtro por tags. Total: {queryset.count()} eventos.")
+            print(f"Paso 3.1: Después de filtro por tags. Total: {queryset.count()} eventos.")
 
         category_filter = params.get('category')
         if category_filter:
             # You can allow multiple categories by splitting with comma
             categories = [cat.strip() for cat in category_filter.split(',')]
-            logger.info(f"Filtro Categoría: Aplicando filtro por categorías: {categories}")
+            print(f"Filtro Categoría: Aplicando filtro por categorías: {categories}")
             queryset = queryset.filter(category__in=categories)
-            logger.info(f"Paso 3.2: Después de filtro por categoría. Total: {queryset.count()} eventos.")
+            print(f"Paso 3.2: Después de filtro por categoría. Total: {queryset.count()} eventos.")
 
         # 4. Búsqueda por texto
         search_query = params.get('search')
@@ -280,7 +305,7 @@ class EventService:
             queryset = queryset.filter(
                 Q(title__icontains=search_query) | Q(description__icontains=search_query)
             ).distinct()
-            logger.info(f"Paso 4: Después de filtro de búsqueda de texto '{search_query}'. Total: {queryset.count()} eventos.")
+            print(f"Paso 4: Después de filtro de búsqueda de texto '{search_query}'. Total: {queryset.count()} eventos.")
 
-        logger.info(f"--- Finalizando EventService.filter_events. Devolviendo {queryset.count()} eventos. ---")
+        print(f"--- Finalizando EventService.filter_events. Devolviendo {queryset.count()} eventos. ---")
         return queryset

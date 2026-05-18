@@ -8,9 +8,18 @@ ENV PYTHONUNBUFFERED 1
 WORKDIR /app
 
 # 3. Dependencias del sistema
+#RUN apt-get update && apt-get install -y \
+#    libpq-dev \
+ #   gcc \
+  #  && rm -rf /var/lib/apt/lists/*
 RUN apt-get update && apt-get install -y \
     libpq-dev \
     gcc \
+    binutils \
+    libproj-dev \
+    gdal-bin \
+    libgdal-dev \
+    python3-gdal \
     && rm -rf /var/lib/apt/lists/*
 
 # 4. Instalación de librerías

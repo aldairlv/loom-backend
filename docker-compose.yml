@@ -2,7 +2,8 @@ version: '3.8'
 
 services:
   db:
-    image: postgres:15
+    #image: postgres:15
+    image: postgis/postgis:15-3.3  # <- ¡Importante! Imagen con PostGIS
     volumes:
       - postgres_data:/var/lib/postgresql/data/
     environment:
@@ -23,10 +24,29 @@ services:
     environment:
       - IS_PERSISTENT=TRUE
       - ANONYMIZED_TELEMETRY=FALSE
+  
+  # NUEVO SERVICIO
+  recommendation-engine:
+    build:
+      context: ./recommendation_service  # Docker buscará el Dockerfile aquí
+    volumes:
+      - ./recommendation_service:/app
+    environment:
+      - CHROMA_HOST=chroma
+      - CHROMA_PORT=8000
+      - DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+    depends_on:
+      #chroma:condition: service_healthy
+      db:
+        condition: service_healthy
+    # No es necesario exponer puertos al exterior si solo Django lo va a llamar,
+    # pero puedes hacerlo para pruebas:
+    ports:
+      - "8080:8080"
 
   web:
     build: ./core_api
-    command: sh -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
+    command: sh -c "python manage.py makemigrations && python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
     volumes:
       - ./core_api:/app
     ports:

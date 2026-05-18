@@ -41,10 +41,23 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'accounts',
-    'blogs',
     'posts',
     'rest_framework',
-    'feed_engine',
+    'profiles',
+    'interactions',
+    'events',
+    'assets',
+    "relationships",
+    'drf_spectacular', # Añade esto
+    'django.contrib.sites',  # Obligatorio para allauth
+    'allauth',
+    'allauth.account',
+    'allauth.socialaccount',
+    'allauth.socialaccount.providers.google', # Para Google
+    'dj_rest_auth',
+    'dj_rest_auth.registration',
+    'rest_framework.authtoken',
+    'django.contrib.gis',  # <- Añade esto
 ]
 
 MIDDLEWARE = [
@@ -55,6 +68,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # Añade esta línea exactamente así:
+    'allauth.account.middleware.AccountMiddleware',
 ]
 
 
@@ -85,7 +100,7 @@ WSGI_APPLICATION = 'loom.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.postgresql',
+        'ENGINE': 'django.contrib.gis.db.backends.postgis', # <- Motor GeoDjango#'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.environ.get('DB_NAME'),
         'USER': os.environ.get('DB_USER'),
         'PASSWORD': os.environ.get('DB_PASSWORD'),
@@ -136,3 +151,107 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+
+REST_FRAMEWORK = {
+    # ...
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+
+    'DEFAULT_AUTHENTICATION_CLASSES': (
+        'rest_framework_simplejwt.authentication.JWTAuthentication',
+    ),
+    'DEFAULT_PERMISSION_CLASSES': (
+        'rest_framework.permissions.IsAuthenticated', # Esto protege TODO por defecto
+    ),
+}
+
+REST_AUTH = {
+    #'USE_JWT': True, # Esto es clave: usa JWT en lugar de tokens opacos
+    #'JWT_AUTH_COOKIE': 'my-app-auth',
+    #'JWT_AUTH_HTTPONLY': False, # Permite que el refresh token sea accesible por JS
+    #'JWT_AUTH_REFRESH_COOKIE': 'my-refresh-token',
+    'USE_JWT': True,
+    'JWT_AUTH_HTTPONLY': False,  # Si no usas cookies, esto no tiene efecto, pero es bueno dejarlo por si acaso.
+    # Desactivamos el manejo de cookies para que los tokens siempre vengan en el body.
+    'JWT_AUTH_COOKIE': None,
+    'JWT_AUTH_REFRESH_COOKIE': None,
+    'USER_DETAILS_SERIALIZER': 'accounts.serializers.UserSerializer',
+    'LOGIN_SERIALIZER': 'accounts.serializers.LoginSerializer',
+    'REGISTER_SERIALIZER': 'accounts.serializers.RegisterSerializer', # Add this line
+    'JWT_SERIALIZER': 'dj_rest_auth.serializers.JWTSerializer', # ¡Esta es la clave para el refresh token!
+
+}
+
+# Configuración de allauth
+SITE_ID = 1
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.ModelBackend',
+    'allauth.account.auth_backends.AuthenticationBackend',
+]
+
+SOCIALACCOUNT_PROVIDERS = {
+    'google': {
+        'SCOPE': ['profile', 'email'],
+        'AUTH_PARAMS': {'access_type': 'online'},
+    }
+}
+
+# (Opcional) Configuración básica de tu API
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Mi API de Usuarios',
+    'DESCRIPTION': 'Documentación de endpoints de mi proyecto',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+}
+
+# Enviar los correos a la consola en lugar de intentar conectar a SMTP
+EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+
+# Opcional: Si quieres desactivar la verificación por email para probar rápido
+# (Esto hará que el usuario quede verificado automáticamente al registrarse)
+ACCOUNT_EMAIL_VERIFICATION = 'none'
+
+# --- Logging Configuration ---
+# Esto es clave para ver los logs de nivel INFO en la consola de Docker.
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': 'INFO', # Captura desde el nivel INFO hacia arriba.
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO', # Puedes cambiarlo a 'DEBUG' para ver aún más detalle.
+            'propagate': True,
+        },
+    },
+}
+
+# Configuración de Allauth para usar email como método de login principal
+ACCOUNT_LOGIN_METHODS = {'email'}
+ACCOUNT_SIGNUP_FIELDS = ['email*', 'username*', 'password1*', 'password2*']
+
+# 1. Ruta base de tu entorno Conda
+CONDAS_ENV_PATH = r"C:\Users\Aldair\miniconda3\envs\geomatico"
+BIN_PATH = os.path.join(CONDAS_ENV_PATH, "Library", "bin")
+
+# Si estás en Windows (Desarrollo local con Conda)
+if os.name == "nt":
+    CONDAS_ENV_PATH = r"C:\Users\Aldair\miniconda3\envs\geomatico"
+    BIN_PATH = os.path.join(CONDAS_ENV_PATH, "Library", "bin")
+
+    if sys.version_info >= (3, 8):
+        os.add_dll_directory(BIN_PATH)
+
+    GDAL_LIBRARY_PATH = os.path.join(BIN_PATH, "gdal.dll")
+    GEOS_LIBRARY_PATH = os.path.join(BIN_PATH, "geos_c.dll")

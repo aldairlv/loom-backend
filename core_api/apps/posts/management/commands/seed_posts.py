@@ -6,8 +6,8 @@ from django.core.files import File
 from django.core.management.base import BaseCommand
 from django.contrib.auth import get_user_model
 from django.conf import settings
-from core_api.apps.blogs.models import Blog
-from core_api.apps.posts.models import Post, ImageBlock, TextBlock, ContentBlockType, Tag
+from blogs.models import Blog
+from posts.models import Post, ImageBlock, TextBlock, ContentBlockType, Tag
 
 # Obtiene el modelo de Usuario que estés usando
 User = get_user_model()
@@ -106,7 +106,7 @@ class Command(BaseCommand):
                 for chunk in django_file.chunks():
                     dest_f.write(chunk)
 
-        image_url = f"{settings.MEDIA_URL}post_images/{image_name}" # -> /media/post_images/image1.jpg
+        image_url = f"http://192.168.0.247:9080/media/post_images/{image_name}" # -> /media/post_images/image1.jpg
 
         ImageBlock.objects.update_or_create(
             post=post,

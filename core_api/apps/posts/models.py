@@ -1,107 +1,90 @@
+import uuid
 from django.db import models
-from django.core.validators import MaxLengthValidator
-from blogs.models import Blog
+from django.conf import settings
+from django.utils import timezone
 
-class ContentBlockType(models.TextChoices):
+class PostStatus(models.TextChoices):
+    DRAFT = 'draft', 'Borrador'
+    PUBLISHED = 'published', 'Publicado'
+    ARCHIVED = 'archived', 'Archivado'
+
+class ContentType(models.TextChoices):
     TEXT = 'text', 'Text'
     IMAGE = 'image', 'Image'
     VIDEO = 'video', 'Video'
     AUDIO = 'audio', 'Audio'
 
+
+
 class Tag(models.Model):
-    name = models.CharField(max_length=50, unique=True)    
-
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    name = models.CharField(max_length=50, unique=True) # Ej: "art"
+    
+    # Si quieres meterle estilos o tipos (trending) aquí, puedes hacerlo
+    # Pero si el estilo cambia dinámicamente, mejor manejarlo en el serializador.
+    is_trending = models.BooleanField(default=False)
+    
     def __str__(self):
-        return f"#{self.name}"
-
+        return self.name
 class Post(models.Model):
-    id = models.BigIntegerField(
-        primary_key=True,
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    
+    author = models.ForeignKey(
+        'profiles.Profile', 
+        on_delete=models.CASCADE, 
+        related_name='posts'
     )
-    blogId = models.ForeignKey(
-        Blog,
-        on_delete=models.CASCADE,
-        related_name='posts',
-    )
-    timestamp = models.BigIntegerField()
-    layout = models.JSONField(
-        default=list,
-        blank=True,
-    )
-    created_at = models.DateTimeField(
-        auto_now_add=True
-    )
-    updated_at = models.DateTimeField(
-        auto_now=True
-    )
-    likes_count = models.PositiveIntegerField(
-        default=0,
-        verbose_name="Likes"
-    )
-    reposts_count = models.PositiveIntegerField(
-        default=0,
-        verbose_name="Reposts"
-    )
-    comments_count = models.PositiveIntegerField(
-        default=0,
-        verbose_name="Comments"
-    )
-    tags = models.ManyToManyField(
-        Tag,
-        related_name='posts',
-        blank=True
-    ) 
 
-    class Meta:
-        ordering = ['-timestamp']
-        indexes = [
-            models.Index(fields=['-timestamp']),
-            models.Index(fields=['blogId', '-timestamp']),
-        ]
+    parent = models.ForeignKey(
+        'self', 
+        on_delete=models.CASCADE, 
+        null=True, 
+        blank=True, 
+        related_name='replies'
+    )
+    
+    root = models.ForeignKey(
+        'self', 
+        on_delete=models.CASCADE, 
+        null=True, 
+        blank=True, 
+        related_name='thread_posts'
+    )
+    
+    status = models.CharField(
+        max_length=20, 
+        choices=PostStatus.choices, 
+        default=PostStatus.PUBLISHED
+    )
+    tags = models.ManyToManyField(Tag, related_name='posts', blank=True)
+    
+    is_deleted = models.BooleanField(default=False)
+    
+    created_at = models.DateTimeField(auto_now_add=True) # Nunca cambia
+    updated_at = models.DateTimeField(auto_now=True)     # Cambia siempre que guardas
+    published_at = models.DateTimeField(null=True, blank=True) # Solo cuando cambia a 'published'
+
+    def save(self, *args, **kwargs):
+        # Lógica para la fecha de publicación
+        if self.status == 'published' and self.published_at is None:
+            self.published_at = timezone.now()
+        super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"Post {self.id} by {self.blog}"
-    
-    @property
-    def notes_count(self):
-        return self.likes_count + self.reposts_count + self.comments_count
-
-class ContentBlock(models.Model):
-    post = models.ForeignKey(
-        Post,
-        on_delete=models.CASCADE,
-        related_name='content_blocks',
-    )
-    
-    type = models.CharField(
-        max_length=10,
-        choices=ContentBlockType.choices,
-    )
-    
-    order = models.PositiveIntegerField(
-        default=0,
-    )
+        return f"Post de {self.author.display_name} ({self.id})"
 
     class Meta:
-        ordering = ['post', 'order']
-        indexes = [
-            models.Index(fields=['post', 'order']),
-        ]
+        ordering = ['-created_at']
 
-    def __str__(self):
-        return f"{self.type} block in Post {self.post_id}"
 
-class TextBlock(ContentBlock):
-    text = models.TextField()
+class PostContent(models.Model):
+    post = models.ForeignKey(Post, related_name='contents', on_delete=models.CASCADE)
+    type = models.CharField(max_length=50, choices=ContentType.choices)
+    order = models.PositiveIntegerField(default=0) # Para mantener el orden (ej: texto, foto, texto)
     
+    # Datos opcionales (Solo uno de estos estará lleno según el 'type')
+    text = models.TextField(blank=True, null=True)
+    media = models.ForeignKey('assets.Media', on_delete=models.SET_NULL, null=True, blank=True)
+
     class Meta:
-        verbose_name = "Text Block"
-        verbose_name_plural = "Text Blocks"
-
-    def __str__(self):
-        preview = self.text[:50] + "..." if len(self.text) > 50 else self.text
-        return f"Text: {preview}"
-
-class ImageBlock(ContentBlock):
-    media = models.JSONField(
-    )
+        ordering = ['order'] # Esto garantiza que siempre salgan en el orden correcto

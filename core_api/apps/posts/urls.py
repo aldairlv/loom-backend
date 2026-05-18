@@ -1,10 +1,15 @@
-from django.urls import path
-from .views import PostListView
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
+from .views import PostViewSet
 
 app_name = 'posts'
 
+# Creamos un router
+router = DefaultRouter()
+# Registramos nuestro ViewSet. 'posts' será el prefijo de la URL (ej: /api/v1/posts/)
+router.register(r'posts', PostViewSet, basename='post')
+
+
 urlpatterns = [
-    # Cuando se acceda a la raíz de las URLs de esta app (que será /v1/posts/),
-    # se llamará a nuestra PostListView.
-    path('', PostListView.as_view(), name='post-list'),
+    path('', include(router.urls)),
 ]

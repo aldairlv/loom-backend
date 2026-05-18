@@ -1,83 +1,55 @@
 from rest_framework import serializers
-from .models import Post, Tag, ContentBlock, TextBlock, ImageBlock
+from drf_spectacular.utils import extend_schema_field
+from assets.serializers import MediaSerializer
+from assets.models import Media, MediaType
+from .models import Tag, PostContent, Post
+from .fields import TagRelatedField # Importamos nuestro nuevo campo
 
-# 1. Serializer sencillo para los Tags
 class TagSerializer(serializers.ModelSerializer):
     class Meta:
         model = Tag
-        fields = ['name']
+        fields = ['id', 'name', 'is_trending']
 
-# 2. Serializers específicos para cada tipo de bloque
-class TextBlockSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = TextBlock
-        fields = ['type','text']
-
-class ImageBlockSerializer(serializers.ModelSerializer):
-    # Declaramos media como MethodField para poder manipular el JSON
-    media = serializers.SerializerMethodField()
-
-    class Meta:
-        model = ImageBlock
-        fields = ['type', 'media']
-
-    def get_media(self, obj):
-        request = self.context.get('request')
-        media_data = obj.media  # Esto es tu lista [ {"url": "..."}, ... ]
-
-        if media_data and request:
-            for item in media_data:
-                # Esta es la línea mágica que convierte la ruta relativa en absoluta.
-                item['url'] = request.build_absolute_uri(item['url'])
-        
-        return media_data
-
-# 3. Serializer "maestro" para bloques de contenido
-class ContentBlockSerializer(serializers.ModelSerializer):
-    def to_representation(self, instance):
-        # Capturamos el contexto que viene del PostSerializer
-        context = self.context
-
-        # Este método detecta si el bloque es de texto o imagen y usa el serializer correcto
-        if hasattr(instance, 'textblock'):
-            return TextBlockSerializer(instance.textblock, context=context).data
-        elif hasattr(instance, 'imageblock'):
-            return ImageBlockSerializer(instance.imageblock, context=context).data
-        return super().to_representation(instance)
+class PostContentSerializer(serializers.ModelSerializer):
+    # Serializamos media anidado para lectura, pero permitimos el ID para escritura
+    media = MediaSerializer(read_only=True) # Para mostrar el objeto media en GET
+    media_id = serializers.PrimaryKeyRelatedField(
+        queryset=Media.objects.all(), source='media', write_only=True, required=False
+    )
+    # Revertimos el campo 'upload'
+    # upload = serializers.FileField(write_only=True, required=False, allow_null=True)
 
     class Meta:
-        model = ContentBlock
-        fields = ['id', 'type', 'order']
+        model = PostContent
+        # 'media_id' es para la entrada (write), 'media' es para la salida (read)
+        fields = ['id', 'type', 'order', 'text', 'media', 'media_id']
+        # Hacemos 'type' y 'order' escribibles
+        read_only_fields = ['id', 'media']
 
-# 4. Serializer principal para el Post
 class PostSerializer(serializers.ModelSerializer):
-    # Para obtener el username, navegamos a través de las relaciones del modelo.
-    # source='blogId.owner.username' le dice a DRF que vaya a:
-    # Post -> blogId (el Blog) -> owner (el User) -> username (el campo del User)
-    username = serializers.CharField(source='blogId.owner.username', read_only=True)
-
-    # Traemos los tags como una lista de strings (nombres)
-    tags = serializers.SlugRelatedField(many=True, read_only=True, slug_field='name')
+    # Relaciones anidadas
+    # Para lectura, mostramos los contenidos completos.
+    contents = PostContentSerializer(many=True, read_only=True)
+    # Para escritura, definimos un campo que sí se mostrará en la entrada (write_only)
+    contents_input = PostContentSerializer(many=True, write_only=True, required=False, source='contents')
     
-    # Traemos los bloques de contenido relacionados
-    # Usamos 'source' para que coincida con el 'related_name' del modelo ContentBlock
-    content = ContentBlockSerializer(source='content_blocks', many=True, read_only=True)
+    # Para los tags, usamos slug para que sea más fácil enviar los nombres desde el frontend
+    tags = TagRelatedField(
+        many=True,
+        queryset=Tag.objects.all(),
+        slug_field='name'
+    )
     
-    # Incluimos la property que definiste en el modelo
-    # y la renombramos de 'notes_count' a 'notesCount'
-    notesCount = serializers.ReadOnlyField(source='notes_count')
-
-    # Renombramos los campos para que el JSON use camelCase
-    likesCount = serializers.IntegerField(source='likes_count', read_only=True)
-    repostsCount = serializers.IntegerField(source='reposts_count', read_only=True)
-    commentsCount = serializers.IntegerField(source='comments_count', read_only=True)
-    createdAt = serializers.DateTimeField(source='created_at', read_only=True)
-    updatedAt = serializers.DateTimeField(source='updated_at', read_only=True)
+    # Información del autor (asumiendo que quieres mostrar el nombre)
+    author_name = serializers.CharField(source='author.slug', read_only=True)
+    # El autor se establece automáticamente en la vista, no se espera en la entrada.
+    author = serializers.PrimaryKeyRelatedField(read_only=True)
 
     class Meta:
         model = Post
         fields = [
-            'id', 'blogId', 'username', 'timestamp', 'layout', 'tags', 
-            'content', 'likesCount', 'repostsCount', 
-            'commentsCount', 'notesCount', 'createdAt', 'updatedAt'
+            'id', 'author', 'author_name', 'parent', 'root', 'contents_input', # 'contents_input' para la entrada
+            'status', 'tags', 'contents', 'created_at',
+            'updated_at', 'published_at'
         ]
+        read_only_fields = ['id', 'author', 'created_at', 'updated_at', 'published_at']

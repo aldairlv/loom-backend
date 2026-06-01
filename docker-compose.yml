@@ -18,15 +18,18 @@ services:
 
 # NUEVO SERVICIO: ChromaDB
   chroma:
-    image: chromadb/chroma:latest
+    image: ghcr.io/chroma-core/chroma:latest # <- 1. Imagen correcta para el servidor
     volumes:
-      - chroma_data:/chroma/chroma  # Persistencia de los embeddings
+      - chroma_data:/chroma/.chroma/ # <- 2. Ruta de persistencia actualizada
     environment:
       - IS_PERSISTENT=TRUE
       - ANONYMIZED_TELEMETRY=FALSE
+      - PERSIST_DIRECTORY=/chroma/.chroma/ # <- 4. Indicar a Chroma dónde persistir
+    ports:
+      - "8001:8000"
   
   # NUEVO SERVICIO
-  recommendation-engine:
+  recommendation_service:
     build:
       context: ./recommendation_service  # Docker buscará el Dockerfile aquí
     volumes:
@@ -36,9 +39,8 @@ services:
       - CHROMA_PORT=8000
       - DATABASE_URL=postgres://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
     depends_on:
-      #chroma:condition: service_healthy
-      db:
-        condition: service_healthy
+      chroma:
+        condition: service_started
     # No es necesario exponer puertos al exterior si solo Django lo va a llamar,
     # pero puedes hacerlo para pruebas:
     ports:
@@ -53,9 +55,18 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    environment:
+      - DB_HOST=db
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - REDIS_URL=redis://redis:6379/0
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+      recommendation_service:
+        condition: service_started
 # INFRAESTRUCTURA APISIX
   etcd:
     image: bitnamilegacy/etcd:3.5
@@ -82,7 +93,65 @@ services:
       - "9000:9000" # Acceso visual: http://localhost:9000
     depends_on:
       - etcd
+  
+  # --- NUEVO SERVICIO: REDIS ---
+  redis:
+    image: "redis:7-alpine"
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # --- NUEVO SERVICIO: CELERY WORKER ---
+  celery_worker:
+    build: ./core_api
+    # Arranca Celery apuntando a la configuración de tu proyecto 'loom'
+    command: celery -A loom worker --loglevel=info
+    volumes:
+      - ./core_api:/app
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=db  # Asegura que sepa dónde está Postgres dentro de Docker
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      recommendation_service:
+        condition: service_started
+
+  # --- NUEVO SERVICIO: CELERY BEAT (scheduler) ---
+  celery_beat:
+    build: ./core_api
+    # Ejecuta el scheduler de Celery (beat)
+    command: celery -A loom beat --loglevel=info --scheduler django_celery_beat.schedulers:DatabaseScheduler
+    volumes:
+      - ./core_api:/app
+    env_file:
+      - .env
+    environment:
+      - DB_HOST=db
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      recommendation_service:
+        condition: service_started
 
 volumes:
   postgres_data:
   chroma_data:
+  redis_data: # <- Añade esto para persistir datos de Redis si es necesario

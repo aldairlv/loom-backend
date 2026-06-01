@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y \
     libproj-dev \
     gdal-bin \
     libgdal-dev \
+    ffmpeg \
     python3-gdal \
     && rm -rf /var/lib/apt/lists/*
 

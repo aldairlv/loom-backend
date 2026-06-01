@@ -9,6 +9,7 @@ class ProfileSerializer(serializers.ModelSerializer):
     avatar = serializers.ImageField(required=False, write_only=True, allow_null=True, allow_empty_file=True)
     banner = serializers.ImageField(required=False, write_only=True, allow_null=True, allow_empty_file=True)
 
+    username = serializers.CharField(source='user.username', read_only=True)
     # Use SerializerMethodField for read operations to return the full URL.
     avatar_url = serializers.SerializerMethodField()
     banner_url = serializers.SerializerMethodField()
@@ -23,13 +24,13 @@ class ProfileSerializer(serializers.ModelSerializer):
         # We explicitly list fields to control the output.
         # 'avatar' and 'banner' are now write-only.
         # 'avatar_url' and 'banner_url' are read-only.
-        fields = [ # Removed slug and is_default
-            'id', 'user', 'display_name', 'bio', 'city', 'timezone',
+        fields = [
+            'id', 'user', 'username', 'display_name', 'bio', 'city', 'timezone',
             'can_be_followed',
             'avatar', 'banner', 'avatar_url', 'banner_url',
             'latitude', 'longitude', 'location_coords'
         ]
-        read_only_fields = ['id', 'user', 'location_coords']
+        read_only_fields = ['id', 'user', 'username', 'location_coords']
 
     @extend_schema_field(serializers.URLField)
     def get_avatar_url(self, obj):

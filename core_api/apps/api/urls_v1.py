@@ -1,15 +1,27 @@
 from django.urls import path, include
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView, SpectacularRedocView
 from accounts.views import EmailValidationView # Import the new view
+from relationships.views import (
+    MeFollowersView, MeFollowingView, MeFriendsView,
+    UserFollowersView
+)
+
 urlpatterns = [
     # Aquí agrupas las rutas por "temática"
     # Esto hará que la URL final sea /v2/timeline/dashboard
     path('posts/', include('posts.urls')),
+    path('feeds/', include('feeds.urls')),
     path('assets/', include('assets.urls')),
     path('profiles/', include('profiles.urls')),
     path('interactions/', include('interactions.urls')),
     path('events/', include('events.urls')), # Nueva ruta para eventos
     path('relationships/', include('relationships.urls')),
+
+    # NEW SEMANTIC ENDPOINTS (Better UX than /relationships/...)
+    path('me/followers/', MeFollowersView.as_view(), name='api-me-followers'),
+    path('me/following/', MeFollowingView.as_view(), name='api-me-following'),
+    path('me/friends/', MeFriendsView.as_view(), name='api-me-friends'),
+    path('users/<uuid:user_id>/followers/', UserFollowersView.as_view(), name='api-user-followers'),
 
     # Rutas de autenticación automática
     path('auth/', include('dj_rest_auth.urls')),

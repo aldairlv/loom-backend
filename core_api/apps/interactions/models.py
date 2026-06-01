@@ -128,3 +128,31 @@ class Bookmark(models.Model):
         # Un perfil solo puede bookmark un evento una vez.
         unique_together = ('profile', 'event')
         ordering = ['-created_at']
+
+
+class PendingInteraction(models.Model):
+    """Tabla intermedia para almacenar interacciones que se procesarán en lote.
+
+    Guardaremos interacciones genéricas (likes, views, follows, etc.) y una
+    tarea periódica las enviará al servicio de recomendaciones.
+    """
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    profile = models.ForeignKey(
+        'profiles.Profile', on_delete=models.CASCADE, related_name='pending_interactions'
+    )
+    content_id = models.CharField(max_length=255)
+    content_type = models.CharField(max_length=32)  # 'post' | 'event' | ...
+    action = models.CharField(max_length=32)  # 'like' | 'view' | 'share' | 'register' | ...
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    processed = models.BooleanField(default=False, db_index=True)
+    processed_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['processed']),
+            models.Index(fields=['profile', 'processed']),
+        ]
+
+    def __str__(self):
+        return f"PendingInteraction {self.action} {self.content_type}:{self.content_id} by {self.profile_id}"

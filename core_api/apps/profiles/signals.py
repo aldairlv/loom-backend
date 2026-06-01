@@ -1,35 +1,33 @@
+from django.db import transaction
 from django.db.models.signals import post_save
 from django.dispatch import receiver
-from django.conf import settings
+from django.contrib.auth import get_user_model
 from .models import Profile
-from django.db.models.signals import post_save
-from django.dispatch import receiver
-from .models import Profile
-# from .services import process_image
+from posts.tasks import initialize_user_in_recommendation_service_task
 
-@receiver(post_save, sender=settings.AUTH_USER_MODEL)
-def create_default_profile(sender, instance, created, **kwargs):
+
+@receiver(post_save, sender=get_user_model())
+def create_profile_for_new_user(sender, instance, created, **kwargs):
+    """Create a Profile automatically when a new User is created."""
     if created:
-        # Aquí garantizamos que el slug sea igual al username
-        # y marcamos este perfil como el predeterminado
-        Profile.objects.create(
+        Profile.objects.get_or_create(
             user=instance,
-            display_name=instance.username
+            defaults={
+                'display_name': instance.username or instance.email,
+            }
         )
 
-"""
-@receiver(post_save, sender=settings.AUTH_USER_MODEL)
-def update_profile_slug(sender, instance, created, **kwargs):
-    if not created:
-        instance.profiles.filter(is_default=True).update(slug=instance.username)
 
 @receiver(post_save, sender=Profile)
-def handle_profile_images(sender, instance, **kwargs):
-    # Procesar Avatar
-    if instance.avatar:
-        process_image(instance.avatar.path, size=(300, 300))
-    
-    # Procesar Banner
-    if instance.banner:
-        process_image(instance.banner.path, size=(1200, 400))
-""" # This was likely the cause of the SyntaxError
+def initialize_user_in_recommendation_service(sender, instance, created, **kwargs):
+    """
+    Cuando se crea un nuevo perfil (Profile), se lanza una tarea asíncrona
+    para inicializar sus vectores de interés en el servicio de recomendación.
+    """
+    if created:
+        # transaction.on_commit asegura que la tarea solo se encole
+        # DESPUÉS de que la transacción de la base de datos que creó el perfil
+        # se haya confirmado exitosamente.
+        # Esto previene el "race condition" donde la tarea podría ejecutarse
+        # antes de que el perfil exista en la BD.
+        transaction.on_commit(lambda: initialize_user_in_recommendation_service_task.apply_async(args=[instance.id]))

@@ -68,6 +68,7 @@ class EventViewSet(viewsets.ModelViewSet):
             OpenApiParameter(name='category', description='Filter by category name (e.g., "sports,music").', type=str),
             OpenApiParameter(name='anywhere', description='Ignore location filters.', type=bool),
             OpenApiParameter(name='anytime', description='Ignore date filters.', type=bool),
+            OpenApiParameter(name='cursor', description='The pagination cursor value for the next or previous page.', type=str),
         ]
     )
     @action(detail=False, methods=['get'])
@@ -132,10 +133,10 @@ class EventViewSet(viewsets.ModelViewSet):
 
         # Get cursor for next/previous page
         paginator = self.paginator
-        cursor_link = paginator.get_next_link() or paginator.get_previous_link()
+        next_link = paginator.get_next_link()
         cursor = None
-        if cursor_link:
-            cursor = cursor_link.split('cursor=')[-1]
+        if next_link:
+            cursor = next_link.split('cursor=')[-1]
 
         logger.info(f"Respuesta final contiene {len(serializer.data)} elementos.")
         logger.info("="*20 + " FIN /events/feed/ " + "="*20 + "\n")

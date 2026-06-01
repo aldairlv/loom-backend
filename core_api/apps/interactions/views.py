@@ -10,49 +10,6 @@ from .serializers import LikeSerializer, PostCommentSerializer, EventCommentSeri
 from . import services
 
 
-class LikeViewSet(viewsets.ModelViewSet):
-    serializer_class = LikeSerializer
-    permission_classes = [IsAuthenticated]
-
-    def get_queryset(self):
-        try:
-            profile = self.request.user.profiles.get(is_default=True)
-        except Profile.DoesNotExist:
-            return Like.objects.none()
-
-        queryset = services.get_likes_for_profile(profile)
-        post_id = self.request.query_params.get('post_id')
-        if post_id:
-            queryset = queryset.filter(post_id=post_id)
-        return queryset
-
-    def create(self, request, *args, **kwargs):
-        try:
-            profile = request.user.profiles.get(is_default=True)
-        except Profile.DoesNotExist:
-            raise ValidationError({
-                'profile': 'El usuario no tiene un perfil por defecto.'
-            })
-
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-
-        post = serializer.validated_data['post']
-        like, created = services.create_like(profile=profile, post=post)
-        if not created:
-            raise ValidationError({
-                'detail': 'Ya existe un like para este post.'
-            })
-
-        output_serializer = self.get_serializer(like)
-        return Response(output_serializer.data, status=status.HTTP_201_CREATED)
-
-    def destroy(self, request, *args, **kwargs):
-        like = self.get_object()
-        services.delete_like(like)
-        return Response(status=status.HTTP_204_NO_CONTENT)
-
-
 class PostCommentViewSet(viewsets.ModelViewSet):
     serializer_class = PostCommentSerializer
     permission_classes = [IsAuthenticated]
@@ -74,11 +31,9 @@ class PostCommentViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         try:
-            profile = request.user.profiles.get(is_default=True)
+            profile = request.user.profile
         except Profile.DoesNotExist:
-            raise ValidationError({
-                'profile': 'El usuario no tiene un perfil por defecto.'
-            })
+            raise ValidationError({'profile': 'El usuario no tiene un perfil.'})
 
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -142,11 +97,9 @@ class EventCommentViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         try:
-            profile = request.user.profiles.get(is_default=True)
+            profile = request.user.profile
         except Profile.DoesNotExist:
-            raise ValidationError({
-                'profile': 'El usuario no tiene un perfil por defecto.'
-            })
+            raise ValidationError({'profile': 'El usuario no tiene un perfil.'})
 
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -195,7 +148,7 @@ class BookmarkViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         try:
-            profile = self.request.user.profiles.get(is_default=True)
+            profile = self.request.user.profile
         except Profile.DoesNotExist:
             return Bookmark.objects.none()
 
@@ -207,11 +160,9 @@ class BookmarkViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         try:
-            profile = request.user.profiles.get(is_default=True)
+            profile = request.user.profile
         except Profile.DoesNotExist:
-            raise ValidationError({
-                'profile': 'El usuario no tiene un perfil por defecto.'
-            })
+            raise ValidationError({'profile': 'El usuario no tiene un perfil.'})
 
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)

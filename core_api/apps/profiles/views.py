@@ -4,6 +4,8 @@ from rest_framework import status
 from rest_framework.response import Response
 from rest_framework.viewsets import ModelViewSet
 from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.decorators import action
+from rest_framework.permissions import IsAuthenticated
 from drf_spectacular.utils import extend_schema, OpenApiExample
 
 from .mixins import MultiSerializerViewSetMixin
@@ -15,6 +17,24 @@ class ProfileViewSet(MultiSerializerViewSetMixin, ModelViewSet):
     parser_classes = (MultiPartParser, FormParser) # Permite subida de archivos
 
     serializer_class = ProfileSerializer 
+
+    @extend_schema(
+        summary="Obtener mi perfil",
+        description="Devuelve el perfil asociado al usuario autenticado.",
+        responses={200: ProfileSerializer}
+    )
+    @action(detail=False, methods=['get'], permission_classes=[IsAuthenticated], url_path='me')
+    def me(self, request):
+        """
+        Devuelve el perfil del usuario autenticado.
+        """
+        try:
+            # La relación OneToOne permite acceder directamente al perfil
+            profile = request.user.profile
+            serializer = self.get_serializer(profile)
+            return Response(serializer.data)
+        except Profile.DoesNotExist:
+            return Response({"detail": "No se encontró un perfil para el usuario actual."}, status=status.HTTP_404_NOT_FOUND)
 
     @extend_schema(
         request={
@@ -54,6 +74,7 @@ class ProfileViewSet(MultiSerializerViewSetMixin, ModelViewSet):
                 value={
                     'id': 'd290f1ee-6c54-4b01-90e6-d701748f0851',
                     'user': 1,
+                    'username': 'aldair',
                     'display_name': 'Aldair',
                     'bio': 'Fullstack developer.',
                     'city': 'Valencia',
@@ -103,6 +124,7 @@ class ProfileViewSet(MultiSerializerViewSetMixin, ModelViewSet):
                 value={
                     'id': 'd290f1ee-6c54-4b01-90e6-d701748f0851',
                     'user': 1,
+                    'username': 'aldair',
                     'display_name': 'Aldair',
                     'bio': 'Updated bio text.',
                     'city': 'Barcelona',

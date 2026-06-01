@@ -42,7 +42,7 @@ class EventSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'creator', 'creator_display_name', 'title', 'slug', 'description',
             'start_time', 'end_time', 'location_name', 'location_address', 'assets', 'asset_ids',
-            'latitude', 'longitude', 'read_latitude', 'read_longitude',
+            'latitude', 'longitude', 'read_latitude', 'read_longitude', 'category',
             'max_attendees', 'is_online', 'is_public',
             'is_cancelled', 'status',  'tags',
             'created_at', 'updated_at'

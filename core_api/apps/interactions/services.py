@@ -1,5 +1,6 @@
 from django.db import transaction
-from .models import Like, PostComment, EventComment, Bookmark
+from django.utils import timezone
+from .models import Like, PostComment, EventComment, Bookmark, PendingInteraction
 
 
 # ==================== LIKE SERVICES ====================
@@ -17,7 +18,20 @@ def get_likes_for_profile(profile):
 
 
 def create_like(profile, post):
-    return Like.objects.get_or_create(profile=profile, post=post)
+    like, created = Like.objects.get_or_create(profile=profile, post=post)
+    # Registrar interacción pendiente para procesamiento en batch
+    if created:
+        try:
+            PendingInteraction.objects.create(
+                profile=profile,
+                content_id=str(post.id),
+                content_type='post',
+                action='like'
+            )
+        except Exception:
+            # No queremos que falle la creación del like por un fallo secundario
+            pass
+    return like, created
 
 
 def delete_like(like):

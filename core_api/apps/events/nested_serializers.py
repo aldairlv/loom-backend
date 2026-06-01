@@ -100,6 +100,7 @@ class EventFeedSerializer(serializers.ModelSerializer):
             "is_public": obj.is_public,
             "is_cancelled": obj.is_cancelled,
             "status": obj.status,
+            "category": obj.category,
         }
 
     @extend_schema_field(FriendsAttendingSerializer(many=True))

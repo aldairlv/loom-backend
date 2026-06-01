@@ -57,6 +57,8 @@ class Post(models.Model):
         default=PostStatus.PUBLISHED
     )
     tags = models.ManyToManyField(Tag, related_name='posts', blank=True)
+
+    layout = models.JSONField(default=list, blank=True)
     
     is_deleted = models.BooleanField(default=False)
     

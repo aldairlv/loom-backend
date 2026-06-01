@@ -207,9 +207,10 @@ class EventService:
                 try:
                     queryset = queryset.filter(
                         location__distance_lte=(ref_point, D(km=radius))
-                    ).annotate(
-                        distance=Distance('location', ref_point)
-                    ).order_by('distance')
+                    ).annotate(distance=Distance('location', ref_point))
+                    # Ordenar por distancia y luego por ID para un orden consistente
+                    # y evitar problemas con la paginación por cursor.
+                    queryset = queryset.order_by('distance', '-id')
                     order_by_distance = True
                 except Exception as exc:
                     print(f"ERROR: No se pudo aplicar el filtro de distancia. Detalles: {exc}")
@@ -281,7 +282,7 @@ class EventService:
         if not order_by_distance:
             print("Ordenando por fecha de inicio.")
             # Re-aplicamos el orden por si se perdió en algún `distinct()`
-            queryset = queryset.order_by('start_time') # Mantener el orden por defecto
+            queryset = queryset.order_by('start_time', '-id') # Mantener el orden por defecto con desempate
 
         # 3. Filtro por Tags/Categoría
         tags_query = params.get('tags') or params.get('category')

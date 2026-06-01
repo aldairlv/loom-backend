@@ -48,7 +48,9 @@ INSTALLED_APPS = [
     'events',
     'assets',
     "relationships",
+    "feeds",
     'drf_spectacular', # Añade esto
+    'django_celery_beat',
     'django.contrib.sites',  # Obligatorio para allauth
     'allauth',
     'allauth.account',
@@ -144,6 +146,11 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/6.0/howto/static-files/
 
 STATIC_URL = 'static/'
+
+# Directorio donde Django buscará archivos estáticos a nivel de proyecto.
+STATICFILES_DIRS = [
+    BASE_DIR / "static",
+]
 
 AUTH_USER_MODEL = 'accounts.User'  # Indica que usaremos nuestro modelo de usuario personalizado
 
@@ -255,3 +262,26 @@ if os.name == "nt":
 
     GDAL_LIBRARY_PATH = os.path.join(BIN_PATH, "gdal.dll")
     GEOS_LIBRARY_PATH = os.path.join(BIN_PATH, "geos_c.dll")
+
+
+# --- CONFIGURACIÓN DE CELERY ---
+CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/0')
+CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/0')
+CELERY_TASK_IGNORE_RESULT = True
+
+# Configuraciones óptimas para evitar tareas colgadas
+CELERY_TASK_TIME_LIMIT = 60  # 5 minutos máximo por tarea
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE
+
+# Schedule para procesar interacciones pendientes en batch (cada 5 minutos)
+from datetime import timedelta
+
+CELERY_BEAT_SCHEDULE = {
+    'process-pending-interactions-every-5-min': {
+        'task': 'core_api.apps.interactions.tasks.process_pending_interactions',
+        'schedule': timedelta(minutes=5),
+    }
+}

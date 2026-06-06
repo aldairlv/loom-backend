@@ -312,6 +312,17 @@ _REDIS_URL = (
     or 'redis://localhost:6379/0'
 )
 
+# Cache compartido entre web, celery y channels (estado online de usuarios)
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': _REDIS_URL,
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        },
+    }
+}
+
 CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
@@ -337,14 +348,15 @@ CHANNEL_LAYERS = {
 # ============================================
 FIREBASE_CREDENTIALS = os.environ.get('FIREBASE_CREDENTIALS_PATH', None)
 
-# Si estás en desarrollo y tienes el archivo JSON de credenciales, úsalo
-if FIREBASE_CREDENTIALS and os.path.exists(FIREBASE_CREDENTIALS):
-    import firebase_admin
-    from firebase_admin import credentials, messaging
-    
-    if not firebase_admin._apps:
-        cred = credentials.Certificate(FIREBASE_CREDENTIALS)
-        firebase_admin.initialize_app(cred)
+if FIREBASE_CREDENTIALS:
+    from notifications.firebase_init import ensure_firebase_initialized
+
+    _firebase_ok, _firebase_error = ensure_firebase_initialized()
+    if not _firebase_ok:
+        import logging
+        logging.getLogger(__name__).warning(
+            'Firebase no inicializado al arrancar Django: %s', _firebase_error
+        )
 
 # ============================================
 # WEBSOCKET SETTINGS

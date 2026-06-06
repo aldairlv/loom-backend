@@ -31,45 +31,62 @@ def send_like_notification(self, actor_id, recipient_id, post_id):
         recipient_id (int): ID del usuario que recibe la notificación
         post_id (str/UUID): ID del post que fue likeado
     """
+    print(f"\n--- [WORKER] INICIO TAREA send_like_notification ---")
+    logger.info(f"[WORKER] Iniciando tarea send_like_notification.")
+    print(f"[WORKER] Parámetros recibidos: actor_id={actor_id}, recipient_id={recipient_id}, post_id={post_id}")
+    logger.info(f"[WORKER] Parámetros: actor_id={actor_id}, recipient_id={recipient_id}, post_id={post_id}")
     try:
+        print(f"[WORKER] Buscando actor (id={actor_id}) y recipient (id={recipient_id}) en la base de datos.")
         # Obtener los usuarios
         actor = User.objects.get(id=actor_id)
         recipient = User.objects.get(id=recipient_id)
+        print(f"[WORKER] Usuarios encontrados: actor='{actor.username}', recipient='{recipient.username}'")
 
         # No enviar notificación si el usuario se da like a sí mismo
+        print(f"[WORKER] IF-CHECK: Verificando si actor_id ({actor_id}) == recipient_id ({recipient_id})")
         if actor_id == recipient_id:
+            print(f"[WORKER] Condición CUMPLIDA. El usuario se dio like a sí mismo. Finalizando tarea.")
             logger.info(f"Usuario {actor_id} se dio like a sí mismo - sin notificación")
             return
 
+        print(f"[WORKER] Condición NO CUMPLIDA. Procediendo a registrar la notificación en la BD.")
         # Registrar la notificación en BD
         from posts.models import Post
+        print(f"[WORKER] Buscando post con id={post_id}")
         post = Post.objects.get(id=post_id)
         content_type = ContentType.objects.get_for_model(Post)
 
+        print(f"[WORKER] Ejecutando Notification.objects.get_or_create para el like.")
         notification, created = Notification.objects.get_or_create(
             recipient=recipient.profile,
             event_type=Notification.EventType.LIKE,
             content_type=content_type,
             object_id=post_id,
         )
+        print(f"[WORKER] Resultado de get_or_create: Notificación {'creada' if created else 'ya existente'}. ID: {notification.id}")
+        logger.info(f"[WORKER] Notificación de like (id={notification.id}) {'creada' if created else 'obtenida'} para recipient {recipient_id}.")
 
         # Preparar datos para la notificación
+        print(f"[WORKER] Preparando el diccionario 'notification_data' para enviar al servicio.")
         notification_data = {
-            'actor_id': actor_id,
-            'actor_name': actor.get_full_name() or actor.username,
+            'actor_id': str(actor_id),
+            'actor_name': actor.profile.display_name if hasattr(actor, 'profile') and actor.profile.display_name else actor.username,
             'actor_avatar': actor.profile.avatar.url if hasattr(actor, 'profile') and actor.profile.avatar else None,
             'post_id': str(post_id),
             'post_title': post.title[:50] if hasattr(post, 'title') else 'Tu post',
             'notification_id': str(notification.id),
         }
+        print(f"[WORKER] 'notification_data' preparado: {notification_data}")
 
         # Enviar la notificación (WebSocket o FCM)
+        print(f"[WORKER] Llamando a NotificationService.send_notification con user_id={recipient_id}, type='like'")
         result = NotificationService.send_notification(
             user_id=recipient_id,
             notification_type='like',
             notification_data=notification_data,
         )
 
+        print(f"[WORKER] Resultado del servicio de notificación: {result}")
         logger.info(
             f"Notificación de like enviada a {recipient.username} "
             f"por método: {result.get('method', 'unknown')}"
@@ -78,9 +95,11 @@ def send_like_notification(self, actor_id, recipient_id, post_id):
         return result
 
     except User.DoesNotExist as e:
+        print(f"[WORKER] ERROR: Usuario no encontrado. {str(e)}")
         logger.error(f"Usuario no encontrado: {str(e)}")
         return {'error': 'usuario_no_encontrado'}
     except Exception as e:
+        print(f"[WORKER] ERROR INESPERADO en la tarea: {str(e)}. Reintentando...")
         logger.error(f"Error en send_like_notification: {str(e)}")
         # Reintentar en caso de error
         raise self.retry(exc=e)
@@ -121,7 +140,7 @@ def send_follow_notification(self, actor_id, recipient_id):
         )
 
         notification_data = {
-            'actor_id': actor_id,
+            'actor_id': str(actor_id),
             'actor_name': actor.get_full_name() or actor.username,
             'actor_avatar': actor.profile.avatar.url if hasattr(actor, 'profile') and actor.profile.avatar else None,
             'notification_id': str(notification.id),
@@ -182,7 +201,7 @@ def send_comment_notification(self, actor_id, recipient_id, post_id, comment_id)
         )
 
         notification_data = {
-            'actor_id': actor_id,
+            'actor_id': str(actor_id),
             'actor_name': actor.get_full_name() or actor.username,
             'actor_avatar': actor.profile.avatar.url if hasattr(actor, 'profile') and actor.profile.avatar else None,
             'post_id': str(post_id),

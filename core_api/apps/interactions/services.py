@@ -1,7 +1,10 @@
+import logging
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 from .models import Like, PostComment, EventComment, Bookmark, PendingInteraction
+
+logger = logging.getLogger(__name__)
 
 
 # ==================== LIKE SERVICES ====================
@@ -19,10 +22,16 @@ def get_likes_for_profile(profile):
 
 
 def create_like(profile, post):
+    print(f"--- [SERVICE] Iniciando create_like para profile: {profile.id} en post: {post.id} ---")
+    logger.info(f"Iniciando create_like para profile: {profile.id} en post: {post.id}")
+
     like, created = Like.objects.get_or_create(profile=profile, post=post)
+    print(f"--- [SERVICE] Like {'creado' if created else 'ya existente'}. ID: {like.id} ---")
+    logger.info(f"Like {'creado' if created else 'ya existente'}. ID: {like.id}")
     # Registrar interacción pendiente para procesamiento en batch
     if created:
         try:
+            print(f"--- [SERVICE] Creando PendingInteraction para el like del profile {profile.id} en el post {post.id} ---")
             PendingInteraction.objects.create(
                 profile=profile,
                 content_id=str(post.id),
@@ -30,24 +39,62 @@ def create_like(profile, post):
                 action='like'
             )
         except Exception:
+            print(f"--- [SERVICE] ERROR al crear PendingInteraction. Se omite para no afectar el like. ---")
+            logger.exception("Error al crear PendingInteraction para un like.")
             # No queremos que falle la creación del like por un fallo secundario
             pass
         # Crear notificación para el autor del post
         try:
-            # Importar localmente para evitar ciclos de import
+            """# Importar localmente para evitar ciclos de import
             from django.contrib.contenttypes.models import ContentType
-            from notifications.models import Notification
+            from notifications.models import Notification, Notification
 
             recipient = getattr(post, 'author', None)
             # No crear notificación si el autor es el mismo que hizo el like
             if recipient and recipient != profile:
-                Notification.objects.create(
+                print(f"--- [SERVICE] Creando notificación de LIKE para el recipient: {recipient.id} ---")
+                logger.info(f"Creando notificación de LIKE. Actor: {profile.id}, Recipient: {recipient.id}, Post: {post.id}")
+                notification = Notification.objects.create(
                     recipient=recipient,
                     event_type=Notification.EventType.LIKE,
                     content_type=ContentType.objects.get_for_model(Like),
                     object_id=like.id,
                 )
+                print(f"--- [SERVICE] Notificación de LIKE creada con ID: {notification.id} ---")
+                logger.info(f"Notificación de LIKE creada con ID: {notification.id}")
+            elif not recipient:
+                print(f"--- [SERVICE] No se pudo obtener el autor del post {post.id}. No se crea notificación. ---")
+            else:
+                print(f"--- [SERVICE] El autor del post es el mismo que da like. No se crea notificación. ---")"""
+            # Importar localmente para evitar dependencias circulares
+            from notifications.tasks import send_like_notification
+            """
+            Envía una notificación de "like" al usuario.
+            
+            Flujo:
+            1. Registra la notificación en BD
+            2. Verifica si el usuario está online (WebSocket)
+            3. Si está online → Enviar por WebSocket
+            4. Si está offline → Enviar Push Notification a FCM
+            
+            Args:
+                actor_id (int): ID del usuario que dio el like
+                recipient_id (int): ID del usuario que recibe la notificación
+                post_id (str/UUID): ID del post que fue likeado
+            """
+            actor_id = profile.user.id
+            recipient_id = getattr(post, 'author', None).user.id if getattr(post, 'author', None) else None
+            post_id = str(post.id)
+            
+            send_like_notification.delay(
+                    actor_id=profile.user.id,
+                    recipient_id=recipient_id,
+                    post_id=post_id
+                )
+
         except Exception:
+            print(f"--- [SERVICE] ERROR al crear la notificación. Se omite para no afectar el like. ---")
+            logger.exception("Error al crear la notificación para un like.")
             # No bloquear la creación del like por fallos en notificaciones
             pass
     return like, created

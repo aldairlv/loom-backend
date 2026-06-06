@@ -25,8 +25,23 @@ class NotificationService:
         Returns:
             bool: True si está online, False si está offline
         """
+        print(f"[NotificationService] Verificando si el usuario {user_id} está online...")
+        logger.info(f"[NotificationService] Verificando estado online para user_id: {user_id}")
+        # --- DEBUGGING: Listar claves en caché ---
+        try:
+            # Esto funciona con el backend de redis, pero puede fallar con otros.
+            all_keys = cache.keys('user_online_*')
+            print(f"[NotificationService-DEBUG] Claves en caché ('user_online_*'): {all_keys}")
+            logger.info(f"[NotificationService-DEBUG] Claves en caché ('user_online_*'): {all_keys}")
+        except Exception as e:
+            print(f"[NotificationService-DEBUG] No se pudieron listar las claves de la caché: {e}")
+            logger.warning(f"[NotificationService-DEBUG] No se pudieron listar las claves de la caché: {e}")
+        # --- FIN DEBUGGING ---
         cache_key = f"user_online_{user_id}"
-        return cache.get(cache_key) is not None
+        is_online = cache.get(cache_key) is not None
+        print(f"[NotificationService] Usuario {user_id} está online: {is_online}")
+        logger.info(f"[NotificationService] Resultado de is_user_online para {user_id}: {is_online}")
+        return is_online
 
     @staticmethod
     def send_notification(
@@ -56,38 +71,60 @@ class NotificationService:
                 'fcm_response': dict (si aplica)
             }
         """
+        print(f"\n--- INICIO send_notification para user_id: {user_id} ---")
+        logger.info(f"Iniciando send_notification para user_id: {user_id}")
+        print(f"Parámetros recibidos: user_id={user_id}, notification_type='{notification_type}', notification_data={notification_data}, fcm_payload={fcm_payload}")
+        logger.info(f"Parámetros: user_id={user_id}, type={notification_type}, data={notification_data}")
+
         # Verificar si el usuario existe
         try:
+            print(f"[send_notification] Buscando usuario con id: {user_id}")
             user = User.objects.get(id=user_id)
+            print(f"[send_notification] Usuario encontrado: {user.username}")
+            logger.info(f"Usuario {user_id} encontrado en la base de datos.")
         except User.DoesNotExist:
+            print(f"[send_notification] ERROR: Usuario {user_id} no encontrado.")
+            logger.error(f"Usuario {user_id} no encontrado al intentar enviar notificación.")
             return {
                 'success': False,
                 'method': 'none',
                 'message': f'Usuario {user_id} no encontrado'
             }
 
+        print(f"[send_notification] Preguntando si el usuario {user_id} está conectado al WebSocket...")
         # Estrategia A: Verificar si el usuario está online
         if NotificationService.is_user_online(user_id):
+            print(f"[send_notification] IF-CHECK: El usuario {user_id} ESTÁ online. Intentando enviar por WebSocket.")
+            logger.info(f"Usuario {user_id} está online. Se intentará enviar por WebSocket.")
             # Enviar por WebSocket (rápido, sin usar batería del teléfono)
             from .consumers import send_notification_via_websocket
             try:
+                print(f"[send_notification] Entrando en la función 'send_notification_via_websocket' para user_id: {user_id}")
                 send_notification_via_websocket(user_id, notification_type, notification_data)
+                print(f"[send_notification] Éxito al enviar por WebSocket a user_id: {user_id}")
+                logger.info(f"Notificación enviada por WebSocket a {user_id} con éxito.")
                 return {
                     'success': True,
                     'method': 'websocket',
                     'message': f'Notificación {notification_type} enviada por WebSocket'
                 }
             except Exception as e:
+                print(f"[send_notification] ERROR al enviar por WebSocket: {str(e)}. Se intentará con FCM.")
                 logger.error(f"Error al enviar por WebSocket: {str(e)}")
                 # Continuar con FCM como fallback
         
+        print(f"[send_notification] IF-CHECK: El usuario {user_id} está OFFLINE. Se enviará Push Notification (FCM).")
+        logger.info(f"Usuario {user_id} está offline. Se procederá con FCM.")
         # Si no está online, enviar Push Notification a FCM
         if fcm_payload is None:
+            print("[send_notification] fcm_payload es None. Construyendo payload por defecto...")
+            logger.info("fcm_payload es None, construyendo payload por defecto.")
             fcm_payload = NotificationService._build_default_fcm_payload(
                 notification_type,
                 notification_data
             )
 
+        print(f"[send_notification] Llamando a 'send_push_notification' para user_id: {user_id}")
         result = NotificationService.send_push_notification(user_id, fcm_payload)
         result['method'] = 'fcm'
         return result
@@ -112,23 +149,33 @@ class NotificationService:
                 'errors': list
             }
         """
-        try:
-            import firebase_admin
-            from firebase_admin import messaging
-        except ImportError:
+        print(f"\n--- INICIO send_push_notification para user_id: {user_id} ---")
+        logger.info(f"Iniciando send_push_notification para user_id: {user_id}")
+        print(f"Parámetros recibidos: user_id={user_id}, fcm_payload={fcm_payload}")
+        logger.info(f"Payload FCM para {user_id}: {fcm_payload}")
+        from .firebase_init import ensure_firebase_initialized
+
+        firebase_ok, firebase_error = ensure_firebase_initialized()
+        if not firebase_ok:
             return {
                 'success': False,
-                'message': 'Firebase Admin SDK no está instalado',
+                'message': firebase_error,
                 'fcm_response': None,
-                'errors': ['firebase-admin no instalado']
+                'errors': [firebase_error],
             }
 
+        from firebase_admin import messaging
+
         # Obtener los dispositivos activos del usuario
+        print(f"[send_push_notification] Buscando dispositivos activos para el usuario {user_id}")
         from .models import UserDevice
         devices = UserDevice.objects.filter(
             account_id=user_id,
             is_active=True
         )
+
+        print(f"[send_push_notification] Se encontraron {devices.count()} dispositivos activos para el usuario {user_id}")
+        logger.info(f"Se encontraron {devices.count()} dispositivos activos para el usuario {user_id}")
 
         if not devices.exists():
             return {
@@ -140,8 +187,12 @@ class NotificationService:
 
         # Extraer tokens FCM
         fcm_tokens = [device.registration_token for device in devices]
+        print(f"[send_push_notification] Tokens FCM a usar: {fcm_tokens}")
+        logger.info(f"Tokens FCM para {user_id}: {fcm_tokens}")
 
         try:
+            print("[send_push_notification] Creando mensaje multicast de FCM...")
+            logger.info("Creando mensaje multicast de FCM...")
             # Crear mensaje multicast (para múltiples dispositivos)
             message = messaging.MulticastMessage(
                 notification=messaging.Notification(
@@ -152,33 +203,39 @@ class NotificationService:
                 tokens=fcm_tokens,
             )
 
-            # Enviar a Firebase
-            response = messaging.send_multicast(message)
+            print("[send_push_notification] Enviando mensaje a Firebase...")
+            logger.info("Enviando mensaje multicast a Firebase...")
+            response = messaging.send_each_for_multicast(message)
 
-            # Procesar respuestas
-            successful = response.successful
-            failed = response.failed
+            success_count = response.success_count
+            failure_count = response.failure_count
+            print(f"[send_push_notification] Respuesta de FCM: {success_count} exitosos, {failure_count} fallidos.")
+            logger.info(f"Respuesta de FCM para {user_id}: {success_count} exitosos, {failure_count} fallidos.")
 
-            if failed:
-                logger.warning(f"FCM: {len(failed)} fallos de {len(fcm_tokens)} intentos")
-                # Marcar dispositivos fallidos como inactivos
-                failed_tokens = [fcm_tokens[idx] for idx, _ in enumerate(failed)]
+            if failure_count:
+                logger.warning(f"FCM: {failure_count} fallos de {len(fcm_tokens)} intentos")
+                failed_tokens = [
+                    fcm_tokens[idx]
+                    for idx, send_response in enumerate(response.responses)
+                    if not send_response.success
+                ]
                 UserDevice.objects.filter(
-                    registration_token__in=[failed_tokens],
+                    registration_token__in=failed_tokens,
                     account_id=user_id
                 ).update(is_active=False)
 
             return {
-                'success': len(failed) == 0,
-                'message': f'Push enviada a {len(successful)}/{len(fcm_tokens)} dispositivos',
+                'success': failure_count == 0,
+                'message': f'Push enviada a {success_count}/{len(fcm_tokens)} dispositivos',
                 'fcm_response': {
-                    'successful': len(successful),
-                    'failed': len(failed),
+                    'successful': success_count,
+                    'failed': failure_count,
                 },
                 'errors': []
             }
 
         except Exception as e:
+            print(f"[send_push_notification] ERROR al enviar Push Notification: {str(e)}")
             logger.error(f"Error al enviar Push Notification: {str(e)}")
             return {
                 'success': False,
@@ -202,6 +259,10 @@ class NotificationService:
         Returns:
             dict: Payload para Firebase
         """
+        print(f"\n--- INICIO _build_default_fcm_payload para tipo: '{notification_type}' ---")
+        logger.info(f"Construyendo payload FCM por defecto para el tipo: {notification_type}")
+        print(f"Datos de notificación recibidos: {notification_data}")
+
         payloads = {
             'like': {
                 'title': f"{notification_data.get('actor_name', 'Usuario')} te dio un like",
@@ -235,13 +296,18 @@ class NotificationService:
             },
         }
 
-        return payloads.get(notification_type, {
+        default_payload = {
             'title': 'Nueva notificación',
             'body': notification_data.get('message', 'Tienes una nueva notificación'),
             'data': {
                 'type': notification_type,
             }
-        })
+        }
+
+        result_payload = payloads.get(notification_type, default_payload)
+        print(f"[_build_default_fcm_payload] Payload construido: {result_payload}")
+        logger.info(f"Payload FCM construido para '{notification_type}': {result_payload}")
+        return result_payload
 
     @staticmethod
     def get_user_devices(user_id: int) -> List[Dict[str, Any]]:

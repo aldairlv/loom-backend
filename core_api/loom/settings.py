@@ -34,6 +34,7 @@ ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(','
 # Application definition
 
 INSTALLED_APPS = [
+    'daphne', # Debe ir ARRIBA de 'django.contrib.staticfiles'
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -49,6 +50,8 @@ INSTALLED_APPS = [
     'assets',
     "relationships",
     "feeds",
+    "notifications",
+    'channels',
     'drf_spectacular', # Añade esto
     'django_celery_beat',
     'django.contrib.sites',  # Obligatorio para allauth
@@ -60,7 +63,13 @@ INSTALLED_APPS = [
     'dj_rest_auth.registration',
     'rest_framework.authtoken',
     'django.contrib.gis',  # <- Añade esto
+    'django.contrib.postgres',
 ]
+
+# ============================================
+# ASGI_APPLICATION - Django Channels
+# ============================================
+ASGI_APPLICATION = 'loom.asgi.application'
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -283,5 +292,63 @@ CELERY_BEAT_SCHEDULE = {
     'process-pending-interactions-every-5-min': {
         'task': 'core_api.apps.interactions.tasks.process_pending_interactions',
         'schedule': timedelta(minutes=5),
-    }
+    },
+    'cleanup-inactive-devices-daily': {
+        'task': 'notifications.tasks.cleanup_inactive_devices',
+        'schedule': timedelta(hours=24),  # Diariamente
+    },
+    'validate-fcm-tokens-daily': {
+        'task': 'notifications.tasks.validate_fcm_tokens',
+        'schedule': timedelta(hours=24),  # Diariamente
+    },
 }
+
+# ============================================
+# CHANNEL LAYERS - Django Channels + Redis
+# ============================================
+_REDIS_URL = (
+    os.environ.get('REDIS_URL')
+    or os.environ.get('CELERY_BROKER_URL')
+    or 'redis://localhost:6379/0'
+)
+
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels_redis.core.RedisChannelLayer',
+        'CONFIG': {
+            'hosts': [{
+                'address': _REDIS_URL,
+                # redis-py 8 defaults socket_timeout=5s, which conflicts with
+                # channels-redis blocking receives (bzpopmin timeout=5s).
+                'socket_timeout': None,
+                'socket_connect_timeout': 5,
+                'retry_on_timeout': True,
+                'health_check_interval': 30,
+                'socket_keepalive': True,
+            }],
+            'capacity': 1500,
+            'expiry': 60,
+        },
+    },
+}
+
+# ============================================
+# FIREBASE CLOUD MESSAGING
+# ============================================
+FIREBASE_CREDENTIALS = os.environ.get('FIREBASE_CREDENTIALS_PATH', None)
+
+# Si estás en desarrollo y tienes el archivo JSON de credenciales, úsalo
+if FIREBASE_CREDENTIALS and os.path.exists(FIREBASE_CREDENTIALS):
+    import firebase_admin
+    from firebase_admin import credentials, messaging
+    
+    if not firebase_admin._apps:
+        cred = credentials.Certificate(FIREBASE_CREDENTIALS)
+        firebase_admin.initialize_app(cred)
+
+# ============================================
+# WEBSOCKET SETTINGS
+# ============================================
+# Tiempo de expiración de la conexión WebSocket (segundos)
+WEBSOCKET_ACCEPT_ALL = False  # Requiere autenticación
+WEBSOCKET_CONNECT_TIMEOUT = 5

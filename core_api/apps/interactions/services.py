@@ -1,4 +1,5 @@
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 from .models import Like, PostComment, EventComment, Bookmark, PendingInteraction
 
@@ -31,6 +32,24 @@ def create_like(profile, post):
         except Exception:
             # No queremos que falle la creación del like por un fallo secundario
             pass
+        # Crear notificación para el autor del post
+        try:
+            # Importar localmente para evitar ciclos de import
+            from django.contrib.contenttypes.models import ContentType
+            from notifications.models import Notification
+
+            recipient = getattr(post, 'author', None)
+            # No crear notificación si el autor es el mismo que hizo el like
+            if recipient and recipient != profile:
+                Notification.objects.create(
+                    recipient=recipient,
+                    event_type=Notification.EventType.LIKE,
+                    content_type=ContentType.objects.get_for_model(Like),
+                    object_id=like.id,
+                )
+        except Exception:
+            # No bloquear la creación del like por fallos en notificaciones
+            pass
     return like, created
 
 
@@ -59,12 +78,18 @@ def get_post_comment_thread(root_comment):
 
 
 def get_root_post_comments_for_post(post):
-    """Obtiene solo los comentarios raíz (primer nivel) de un post"""
+    """Obtiene solo los comentarios raíz (primer nivel) de un post.
+
+    Si un comentario raíz está eliminado, aún se incluye si tiene respuestas visibles.
+    Esto evita que el recuento de comentarios sea mayor que los comentarios mostrados
+    cuando solo quedan respuestas a un comentario raíz eliminado.
+    """
     return PostComment.objects.filter(
         post=post,
-        parent__isnull=True,
-        is_deleted=False
-    ).select_related('profile', 'post').prefetch_related('replies')
+        parent__isnull=True
+    ).select_related('profile', 'post').prefetch_related('replies').filter(
+        Q(is_deleted=False) | Q(replies__is_deleted=False)
+    ).distinct()
 
 
 def create_post_comment(profile, post, text, parent=None):
@@ -76,6 +101,22 @@ def create_post_comment(profile, post, text, parent=None):
             text=text,
             parent=parent
         )
+        # Crear notificación para el autor del post (si no es el mismo que comenta)
+        try:
+            from django.contrib.contenttypes.models import ContentType
+            from notifications.models import Notification
+
+            recipient = getattr(post, 'author', None)
+            if recipient and recipient != profile:
+                Notification.objects.create(
+                    recipient=recipient,
+                    event_type=Notification.EventType.COMMENT,
+                    content_type=ContentType.objects.get_for_model(PostComment),
+                    object_id=comment.id,
+                )
+        except Exception:
+            pass
+
         return comment
 
 
@@ -116,12 +157,18 @@ def get_event_comment_thread(root_comment):
 
 
 def get_root_event_comments_for_event(event):
-    """Obtiene solo los comentarios raíz (primer nivel) de un evento"""
+    """Obtiene solo los comentarios raíz (primer nivel) de un evento.
+
+    Si un comentario raíz está eliminado, aún se incluye si tiene respuestas visibles.
+    Esto evita que el recuento de comentarios sea mayor que los comentarios mostrados
+    cuando solo quedan respuestas a un comentario raíz eliminado.
+    """
     return EventComment.objects.filter(
         event=event,
-        parent__isnull=True,
-        is_deleted=False
-    ).select_related('profile', 'event').prefetch_related('replies')
+        parent__isnull=True
+    ).select_related('profile', 'event').prefetch_related('replies').filter(
+        Q(is_deleted=False) | Q(replies__is_deleted=False)
+    ).distinct()
 
 
 def create_event_comment(profile, event, text, parent=None):
@@ -133,6 +180,22 @@ def create_event_comment(profile, event, text, parent=None):
             text=text,
             parent=parent
         )
+        # Crear notificación para el creador del evento (si no es el mismo que comenta)
+        try:
+            from django.contrib.contenttypes.models import ContentType
+            from notifications.models import Notification
+
+            recipient = getattr(event, 'creator', None)
+            if recipient and recipient != profile:
+                Notification.objects.create(
+                    recipient=recipient,
+                    event_type=Notification.EventType.COMMENT,
+                    content_type=ContentType.objects.get_for_model(EventComment),
+                    object_id=comment.id,
+                )
+        except Exception:
+            pass
+
         return comment
 
 

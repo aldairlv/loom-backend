@@ -10,10 +10,12 @@ from interactions.models import Like
 from interactions import services as interaction_services
 from .serializers import PostSerializer, TagSerializer, PostCreateSerializer
 from .tasks import indexar_post_task
-from interactions.serializers import LikeSerializer
+from interactions.serializers import LikeSerializer, PostCommentSerializer
+from interactions.models import PostComment as InteractionPostComment
 from . import services
-from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiExample
 from django.shortcuts import get_object_or_404
+from django.conf import settings
 
 
 class PostCursorPagination(CursorPagination):
@@ -346,6 +348,139 @@ class PostViewSet(viewsets.ModelViewSet):
 
         like = get_object_or_404(Like, profile=profile, post=post)
         interaction_services.delete_like(like)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @extend_schema(
+        request={
+            "application/json": {
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string"}
+                },
+                "required": ["text"]
+            }
+        },
+        examples=[
+            OpenApiExample(
+                'Create post comment',
+                value={"text": "nice post"},
+                request_only=True,
+            )
+        ],
+    )
+    @action(detail=True, methods=['get', 'post'], url_path='comments', permission_classes=[IsAuthenticated])
+    def comments(self, request, pk=None):
+        """GET: Lista los comentarios raíz de un post (con sus replies).
+        POST: Crear un comentario directamente sobre el post (sin parent)."""
+        post = self.get_object()
+
+        if request.method == 'GET':
+            # Soporte para incluir comentarios eliminados vía query param
+            include_deleted = request.query_params.get('include_deleted')
+            if include_deleted and include_deleted.lower() in ('1', 'true', 'yes'):
+                base_qs = interaction_services.get_post_comments_for_post(post, include_deleted=True).filter(parent__isnull=True)
+            else:
+                base_qs = interaction_services.get_root_post_comments_for_post(post)
+
+            # Orden estable por fecha y id
+            queryset = base_qs.order_by('created_at', 'id')
+
+            # Cursor-based offset pagination (simple): cursor is an integer offset.
+            # If the client sends cursor=null (or no cursor), treat as first page / reload.
+            raw_cursor = request.query_params.get('cursor')
+            if raw_cursor is None or str(raw_cursor).lower() in ('null', 'none', ''):
+                offset = 0
+            else:
+                try:
+                    offset = int(raw_cursor)
+                    if offset < 0:
+                        offset = 0
+                except Exception:
+                    offset = 0
+
+            page_size = getattr(settings, 'COMMENTS_PAGE_SIZE', 10)
+
+            # Fetch one extra to know if there is a next page
+            items = list(queryset[offset: offset + page_size + 1])
+            has_more = len(items) > page_size
+            page_items = items[:page_size]
+
+            serializer = PostCommentSerializer(page_items, many=True, context=self.get_serializer_context())
+
+            next_cursor = (offset + page_size) if has_more else None
+
+            # Build meta like other responses
+            request_user = request
+            user_id = None
+            if request_user and hasattr(request_user, 'user') and request_user.user.is_authenticated:
+                try:
+                    user_id = str(request_user.user.id)
+                except Exception:
+                    user_id = None
+
+            response_body = {
+                "meta": {"status": 200, "msg": "OK", "xRoomUserId": user_id},
+                "response": {
+                    "comments": {
+                        "elements": serializer.data,
+                        "queryParams": {"cursor": next_cursor}
+                    }
+                }
+            }
+
+            return Response(response_body)
+
+        # POST -> crear comentario raíz
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "El usuario no tiene un perfil."}, status=status.HTTP_400_BAD_REQUEST)
+
+        text = request.data.get('text')
+        if text is None:
+            return Response({"text": "Este campo es requerido."}, status=status.HTTP_400_BAD_REQUEST)
+
+        comment = interaction_services.create_post_comment(
+            profile=profile,
+            post=post,
+            text=text,
+            parent=None
+        )
+
+        output_serializer = PostCommentSerializer(comment, context=self.get_serializer_context())
+        return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['post', 'delete'], url_path=r'comments/(?P<comment_id>[^/.]+)', permission_classes=[IsAuthenticated])
+    def comment_detail(self, request, pk=None, comment_id=None):
+        """Crear una respuesta a un comentario o eliminar un comentario específico."""
+        post = self.get_object()
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response({"detail": "El usuario no tiene un perfil."}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Obtener comentario padre/objetivo
+        parent_comment = get_object_or_404(InteractionPostComment, pk=comment_id)
+        if parent_comment.post_id != post.id:
+            return Response({"detail": "El comentario especificado no pertenece a este post."}, status=status.HTTP_400_BAD_REQUEST)
+
+        if request.method == 'POST':
+            text = request.data.get('text')
+            if text is None:
+                return Response({"text": "Este campo es requerido."}, status=status.HTTP_400_BAD_REQUEST)
+
+            comment = interaction_services.create_post_comment(
+                profile=profile,
+                post=post,
+                text=text,
+                parent=parent_comment
+            )
+
+            output_serializer = PostCommentSerializer(comment, context=self.get_serializer_context())
+            return Response(output_serializer.data, status=status.HTTP_201_CREATED)
+
+        # DELETE
+        interaction_services.delete_post_comment(parent_comment, soft_delete=True)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 

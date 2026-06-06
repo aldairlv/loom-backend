@@ -2,6 +2,7 @@ from rest_framework import viewsets, status
 from rest_framework.exceptions import ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from drf_spectacular.utils import extend_schema
 
 from profiles.models import Profile
 from events.models import Event
@@ -10,6 +11,7 @@ from .serializers import LikeSerializer, PostCommentSerializer, EventCommentSeri
 from . import services
 
 
+@extend_schema(deprecated=True, tags=['Deprecated', 'Interactions'])
 class PostCommentViewSet(viewsets.ModelViewSet):
     serializer_class = PostCommentSerializer
     permission_classes = [IsAuthenticated]

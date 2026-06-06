@@ -26,7 +26,7 @@ class EventServiceGeoFilterTests(TestCase):
             title='Nearby Event',
             description='An event close to the user location.',
             start_time=timezone.now() + timezone.timedelta(days=1),
-            status=EventStatus.SCHEDULED,
+            status=EventStatus.PUBLISHED,
             is_public=True,
             location=Point(0.1, 0.1, srid=4326),
             category=EventCategory.OTHER,
@@ -36,13 +36,30 @@ class EventServiceGeoFilterTests(TestCase):
             title='Far Away Event',
             description='An event outside the default radius.',
             start_time=timezone.now() + timezone.timedelta(days=1),
-            status=EventStatus.SCHEDULED,
+            status=EventStatus.PUBLISHED,
             is_public=True,
             location=Point(10.0, 10.0, srid=4326),
             category=EventCategory.OTHER,
         )
 
-    def test_filter_events_with_profile_location_does_not_raise(self):
+        self.valid_user = User.objects.create_user(
+            email='valid@example.com',
+            username='validuser',
+            password='testpass123'
+        )
+        self.valid_profile = Profile.objects.create(
+            user=self.valid_user,
+            display_name='Valid User',
+            location=Point(0.1, 0.1, srid=4326)
+        )
+
+    def test_filter_events_ignores_zero_zero_user_location(self):
         queryset = EventService.filter_events({}, self.profile)
+        self.assertEqual(queryset.count(), 2)
+        titles = {event.title for event in queryset}
+        self.assertSetEqual(titles, {'Nearby Event', 'Far Away Event'})
+
+    def test_filter_events_uses_valid_profile_location(self):
+        queryset = EventService.filter_events({}, self.valid_profile)
         self.assertEqual(queryset.count(), 1)
         self.assertEqual(queryset.first().title, 'Nearby Event')

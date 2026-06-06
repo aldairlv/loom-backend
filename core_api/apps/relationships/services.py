@@ -19,6 +19,23 @@ def follow_profile(from_profile: Profile, to_profile: Profile):
         from_profile=from_profile,
         to_profile=to_profile
     )
+    # Crear notificación para el perfil seguido cuando se crea un nuevo follow
+    if created:
+        try:
+            from django.contrib.contenttypes.models import ContentType
+            from notifications.models import Notification
+
+            # Evitar notificar si el usuario se sigue a sí mismo (validado antes)
+            recipient = to_profile
+            if recipient and recipient != from_profile:
+                Notification.objects.create(
+                    recipient=recipient,
+                    event_type=Notification.EventType.FOLLOW,
+                    content_type=ContentType.objects.get_for_model(Follow),
+                    object_id=follow.id,
+                )
+        except Exception:
+            pass
     return follow, created
 
 

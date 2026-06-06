@@ -5,6 +5,7 @@ from relationships.views import (
     MeFollowersView, MeFollowingView, MeFriendsView,
     UserFollowersView
 )
+from notifications.views import RegisterDeviceView
 
 urlpatterns = [
     # Aquí agrupas las rutas por "temática"
@@ -16,12 +17,14 @@ urlpatterns = [
     path('interactions/', include('interactions.urls')),
     path('events/', include('events.urls')), # Nueva ruta para eventos
     path('relationships/', include('relationships.urls')),
+    path('notifications/', include('notifications.urls')),
 
     # NEW SEMANTIC ENDPOINTS (Better UX than /relationships/...)
     path('me/followers/', MeFollowersView.as_view(), name='api-me-followers'),
     path('me/following/', MeFollowingView.as_view(), name='api-me-following'),
     path('me/friends/', MeFriendsView.as_view(), name='api-me-friends'),
     path('users/<uuid:user_id>/followers/', UserFollowersView.as_view(), name='api-user-followers'),
+    path('devices/', RegisterDeviceView.as_view(), name='register-device-main'),
 
     # Rutas de autenticación automática
     path('auth/', include('dj_rest_auth.urls')),

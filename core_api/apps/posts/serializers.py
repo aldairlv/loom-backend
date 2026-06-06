@@ -118,7 +118,7 @@ class RootPostSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Post
-        fields = ['id', 'author', 'contents']
+        fields = ['id', 'author', 'contents', 'layout']
 
 class PostSerializer(serializers.ModelSerializer):
     # Relaciones anidadas
@@ -136,7 +136,7 @@ class PostSerializer(serializers.ModelSerializer):
     # --- Campos para LECTURA (GET) ---
     # Muestran la información anidada del autor.
     parent = ParentPostSerializer(read_only=True)
-    root = RootPostSerializer(read_only=True)
+    root_post = RootPostSerializer(source='root', read_only=True)
     trail = serializers.SerializerMethodField()
     interactions = serializers.SerializerMethodField()
     stats = serializers.SerializerMethodField()
@@ -152,17 +152,25 @@ class PostSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Post
-        fields = '__all__'
+        fields = [
+            'id', 'author', 'parent_id', 'root_id', 
+            'status', 'tags', 'contents', 'layout',# 'show_trailing',
+            'is_deleted', 'created_at', 'updated_at', 'published_at', 
+            'parent', 'root_post', 'trail', 'interactions', 'stats', #'trail_ids'
+        ]
         read_only_fields = [
-            'id', 'author', 'parent', 'root', 'contents', 'created_at', 'updated_at',
-            'published_at',
-            'interactions', 'stats',
+            'id', 'author', 'contents', 'created_at', 'updated_at',
+            'published_at', 'parent', 'root_post', 'trail', 'interactions', 'stats', 'trail_ids',
         ]
 
     def get_trail(self, obj):
-        from .services import build_post_trail
-        trail_posts = build_post_trail(obj)
-        return PostTrailSerializer(trail_posts, many=True, context=self.context).data
+        if not obj.trail_ids:
+            return []
+
+        order_map = {post_id: index for index, post_id in enumerate(obj.trail_ids)}
+        posts = Post.objects.filter(id__in=obj.trail_ids).select_related('author').prefetch_related('contents__media')
+        ordered_posts = sorted(posts, key=lambda post: order_map.get(post.id, 0))
+        return PostTrailSerializer(ordered_posts, many=True, context=self.context).data
 
     def get_interactions(self, obj: Post) -> dict:
         """Devuelve las interacciones del usuario actual sobre el post."""
@@ -224,10 +232,11 @@ class PostCreateSerializer(serializers.ModelSerializer):
     root_id = serializers.PrimaryKeyRelatedField(
         queryset=Post.objects.all(), source='root', write_only=True, required=False, allow_null=True
     )
+    show_trailing = serializers.BooleanField(required=False, default=True)
 
     class Meta:
         model = Post
-        fields = ['parent_id', 'root_id', 'status', 'tags', 'contents_input', 'layout']
+        fields = ['parent_id', 'root_id', 'status', 'tags', 'contents_input', 'layout', 'show_trailing']
 
     def create(self, validated_data):
         # El servicio create_post ya maneja la lógica de parent/root y tags.

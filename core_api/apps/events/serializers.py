@@ -1,7 +1,8 @@
 from rest_framework import serializers
-from .models import Event, EventStatus
+from .models import Event, EventReview, EventStatus
 from posts.fields import TagRelatedField # Reusing TagRelatedField from posts app
 from profiles.models import Profile # For creator validation
+from profiles.serializers import ProfileSerializer
 from posts.models import Tag
 from assets.models import Media
 from assets.serializers import MediaSerializer
@@ -13,7 +14,8 @@ class EventSerializer(serializers.ModelSerializer):
         many=True,
         queryset=Tag.objects.all(),
         slug_field='name',
-        required=False
+        required=False,
+        allow_null=True
     )
     # Read-only field for the creator's display name
     creator_display_name = serializers.CharField(source='creator.display_name', read_only=True)
@@ -26,6 +28,32 @@ class EventSerializer(serializers.ModelSerializer):
         write_only=True,
         required=False
     )
+    thumbnail_url = serializers.SerializerMethodField(read_only=True)
+    thumbnail_id = serializers.PrimaryKeyRelatedField(
+        queryset=Media.objects.all(),
+        source='thumbnail',
+        write_only=True,
+        required=False,
+        allow_null=True
+    )
+
+    payment_methods_allowed = serializers.ListField(
+        child=serializers.ChoiceField(choices=Event.PaymentMethod.choices),
+        required=False,
+        allow_empty=True
+    )
+    requirements = serializers.ListField(
+        child=serializers.CharField(),
+        required=False,
+        allow_empty=True
+    )
+    secure_attendance_token = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    support_email = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+    website_url = serializers.URLField(required=False, allow_blank=True, allow_null=True)
+    whatsapp_url = serializers.URLField(required=False, allow_blank=True, allow_null=True)
+    telegram_url = serializers.URLField(required=False, allow_blank=True, allow_null=True)
+    discord_url = serializers.URLField(required=False, allow_blank=True, allow_null=True)
+    zoom_url = serializers.URLField(required=False, allow_blank=True, allow_null=True)
 
     # Campos para manejar la geolocalización sin exponer el PointField directamente.
     # Para la entrada (write), aceptamos lat/lon.
@@ -40,23 +68,34 @@ class EventSerializer(serializers.ModelSerializer):
     class Meta:
         model = Event
         fields = [
-            'id', 'creator', 'creator_display_name', 'title', 'slug', 'description',
+            'id', 'creator', 'creator_display_name', 'title', 'description',
             'start_time', 'end_time', 'location_name', 'location_address', 'assets', 'asset_ids',
+            'thumbnail_url', 'thumbnail_id',
             'latitude', 'longitude', 'read_latitude', 'read_longitude', 'category',
             'max_attendees', 'is_online', 'is_public',
+            'requires_payment', 'price_amount', 'price_currency', 'stripe_price_id',
+            'payment_methods_allowed', 'requirements', 'secure_attendance_token', 'support_email',
+            'support_url', 'website_url', 'whatsapp_url', 'telegram_url', 'discord_url', 'zoom_url',
+            'timezone', 'requires_qr_checkin', 'meeting_instructions',
+            'live_stream_url', 'is_free',
             'is_cancelled', 'status',  'tags',
             'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'creator', 'creator_display_name', 'is_cancelled',
                             'created_at', 'updated_at' ]
-        extra_kwargs = {
-            'slug': {'required': False, 'allow_blank': True}
-        }
 
     def get_latitude(self, obj: Event) -> float | None:
         """Devuelve la latitud desde el campo PointField."""
         if obj.location:
             return obj.location.y
+        return None
+
+    def get_thumbnail_url(self, obj: Event) -> str | None:
+        request = self.context.get('request')
+        if obj.thumbnail and obj.thumbnail.url:
+            if request:
+                return request.build_absolute_uri(obj.thumbnail.url)
+            return obj.thumbnail.url
         return None
 
     def get_longitude(self, obj: Event) -> float | None:
@@ -102,7 +141,7 @@ class EventSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data: dict) -> Event:
         # Handle tags separately as they are ManyToMany
-        tags_data = validated_data.pop('tags', [])
+        tags_data = validated_data.pop('tags', []) or []
         assets_data = validated_data.pop('assets', [])
         # Remove lat/lon as they are already processed into 'location'
         validated_data.pop('latitude', None)
@@ -128,3 +167,13 @@ class EventSerializer(serializers.ModelSerializer):
         if assets_data is not None:
             instance.assets.set(assets_data)
         return instance
+
+
+class EventReviewSerializer(serializers.ModelSerializer):
+    user = ProfileSerializer(read_only=True)
+    comment = serializers.CharField(required=False, allow_blank=True, allow_null=True)
+
+    class Meta:
+        model = EventReview
+        fields = ['id', 'user', 'rating', 'comment', 'created_at', 'updated_at']
+        read_only_fields = ['id', 'user', 'created_at', 'updated_at']

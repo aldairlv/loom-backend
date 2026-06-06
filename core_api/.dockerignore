@@ -1,0 +1,11 @@
+# Ignorar el entorno virtual para no sobreescribir las dependencias del contenedor
+venv/
+*.venv
+
+# Archivos de configuración de IDEs y caché de Python
+.vscode/
+__pycache__/
+*.pyc
+
+# Archivos de sistema operativo
+.DS_Store

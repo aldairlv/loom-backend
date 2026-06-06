@@ -1,11 +1,11 @@
 import uuid
 import logging
+import secrets
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 
 from django.db import transaction
 from django.db.models import QuerySet, Q
-from django.utils.text import slugify
 from django.utils import timezone
 from django.contrib.gis.geos import Point
 from django.contrib.gis.db.models.functions import Distance
@@ -13,7 +13,7 @@ from django.contrib.gis.measure import D  # Importamos D para manejar distancias
 
 from profiles.models import Profile
 from posts.models import Tag # Assuming Tag model is in posts app
-from .models import Event, EventStatus, EventCategory
+from .models import Event, EventStatus, EventCategory, EventAttendance
 
 logger = logging.getLogger(__name__)
 
@@ -48,10 +48,14 @@ class EventService:
         return queryset.order_by('start_time')
 
     @staticmethod
+    def _generate_secure_attendance_token() -> str:
+        return secrets.token_urlsafe(32)
+
+    @staticmethod
     def create_event(creator: Profile, event_data: Dict[str, Any]) -> Event:
         """
         Creates a new event.
-        Handles tag assignment and slug generation.
+        Handles tag assignment.
         """
         with transaction.atomic():
             tags_data = event_data.pop('tags', [])
@@ -60,28 +64,25 @@ class EventService:
             # We must remove them here before passing to the model create method.
             event_data.pop('latitude', None)
             event_data.pop('longitude', None)
-            
-            # Slug generation is handled in the model's save method, but we can pre-process if needed
-            # For now, let the model handle it.
-            
+
             event = Event.objects.create(creator=creator, **event_data)
-            
             event.tags.set(tags_data)
             event.assets.set(assets_data)
+
+            if event.requires_qr_checkin:
+                event.secure_attendance_token = EventService._generate_secure_attendance_token()
+                event.save(update_fields=['secure_attendance_token'])
+
             return event
 
     @staticmethod
     def update_event(event: Event, update_data: Dict[str, Any]) -> Event:
         """
         Updates an existing event.
-        Handles tag assignment and slug regeneration if title changes.
+        Handles tag assignment.
         """
         with transaction.atomic():
             tags_data: Optional[List[Tag]] = update_data.pop('tags', None)
-            
-            # If title is updated and slug is not explicitly provided, clear slug to regenerate
-            if 'title' in update_data and 'slug' not in update_data:
-                event.slug = '' # This will trigger slug generation in model's save method
 
             for attr, value in update_data.items():
                 setattr(event, attr, value)
@@ -89,7 +90,7 @@ class EventService:
             event.save()
 
             if tags_data is not None:
-                event.tags.set(tags_data)
+                event.tags.set(tags_data or [])
             
             return event
 
@@ -115,7 +116,9 @@ class EventService:
 
         if is_attending:
             # If already attending, remove (Cancel RSVP)
+            # Also remove the attendance record if it exists
             event.attendees.remove(profile)
+            EventAttendance.objects.filter(event=event, attendee=profile).delete()
             joined = False
             message = "Asistencia cancelada con éxito."
         else:
@@ -125,6 +128,9 @@ class EventService:
                 raise ValueError("Este evento ha alcanzado el límite máximo de asistentes.")
             
             event.attendees.add(profile)
+            if event.requires_qr_checkin:
+                # Create a secure attendance record for this user and event
+                EventAttendance.objects.create(event=event, attendee=profile, secure_attendance_token=EventService._generate_secure_attendance_token())
             joined = True
             message = "Asistencia confirmada con éxito."
         return joined, message
@@ -169,12 +175,12 @@ class EventService:
         Aplica filtros inteligentes a la lista de eventos.
         """
         print("--- Iniciando EventService.filter_events ---")
-        # Modificación: Partimos de un queryset que ya filtra por 'SCHEDULED'
+        # Modificación: Partimos de un queryset que ya filtra por 'PUBLISHED'
         base_queryset = EventService.get_public_and_user_events(user_profile)
         queryset = base_queryset.filter(
-            status=EventStatus.SCHEDULED
+            status=EventStatus.PUBLISHED
         )
-        print(f"Paso 0: Queryset inicial (públicos + del usuario, 'SCHEDULED'). Total: {queryset.count()} eventos.")
+        print(f"Paso 0: Queryset inicial (públicos + del usuario, 'PUBLISHED'). Total: {queryset.count()} eventos.")
 
         # 1. Filtro de Geolocalización
         lat = params.get('lat')
@@ -194,13 +200,20 @@ class EventService:
         if not anywhere:
             if lat and lng:
                 try:
-                    ref_point = Point(float(lng), float(lat), srid=4326)
+                    lat_f = float(lat)
+                    lng_f = float(lng)
+                    if not (lat_f == 0.0 and lng_f == 0.0):
+                        ref_point = Point(lng_f, lat_f, srid=4326)
+                    else:
+                        print("Filtro Geo: Coordenadas 0,0 recibidas; no se aplicará filtro de radio.")
                 except (ValueError, TypeError):
                     print(f"ADVERTENCIA: Coordenadas inválidas recibidas: lat={lat}, lng={lng}")
-                    pass # Ignore if coordinates are invalid
             elif user_profile and user_profile.location:
-                ref_point = user_profile.location
-                print("Filtro Geo: Usando localización del perfil de usuario.")
+                if not (user_profile.location.x == 0.0 and user_profile.location.y == 0.0):
+                    ref_point = user_profile.location
+                    print("Filtro Geo: Usando localización del perfil de usuario.")
+                else:
+                    print("Filtro Geo: La ubicación del perfil es 0,0; no se aplicará filtro de radio.")
 
             if ref_point:
                 print(f"Filtro Geo: Punto de referencia encontrado: {ref_point}. Aplicando filtro de radio de {radius} km.")
@@ -216,10 +229,9 @@ class EventService:
                     print(f"ERROR: No se pudo aplicar el filtro de distancia. Detalles: {exc}")
                     queryset = queryset.none()
             else:
-                # Si no hay punto de referencia (ni en params ni en perfil), y no es 'anywhere',
-                # no devolvemos ningún resultado geolocalizado.
-                print("Filtro Geo: No hay punto de referencia y 'anywhere' es false. No se devuelven eventos.")
-                queryset = queryset.none()
+                # Si no hay punto de referencia válido (ni en params ni en perfil válido),
+                # no aplicamos el filtro de radio y seguimos con los demás filtros.
+                print("Filtro Geo: No se encontró ubicación válida; se omite el filtro de radio.")
         else:
             print("Filtro Geo: 'anywhere' es true, se omiten filtros de localización.")
         # If no reference point is found and 'anywhere' is not true, no location filter is applied.

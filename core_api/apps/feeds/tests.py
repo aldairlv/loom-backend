@@ -8,6 +8,7 @@ from accounts.models import User
 from profiles.models import Profile
 from posts.models import Post
 from relationships.models import Follow
+from events.models import Event, EventCategory, EventStatus
 
 
 class FeedViewSetTests(APITestCase):
@@ -50,7 +51,27 @@ class FeedViewSetTests(APITestCase):
             created_at=timezone.now()
         )
 
+        self.soon_event = Event.objects.create(
+            creator=self.profile2,
+            title='Soon Sports Event',
+            description='Event within the 7-14 day window.',
+            start_time=timezone.now() + timedelta(days=8),
+            status=EventStatus.PUBLISHED,
+            is_public=True,
+            category=EventCategory.SPORTS,
+        )
+        self.outside_event = Event.objects.create(
+            creator=self.profile2,
+            title='Far Future Event',
+            description='Event outside the 7-14 day window.',
+            start_time=timezone.now() + timedelta(days=20),
+            status=EventStatus.PUBLISHED,
+            is_public=True,
+            category=EventCategory.SPORTS,
+        )
+
         self.feed_url = reverse('feeds-list')
+        self.soon_url = reverse('feeds-soon')
         self.client.force_authenticate(user=self.user1)
 
     def test_feed_requires_authentication(self):
@@ -111,6 +132,25 @@ class FeedViewSetTests(APITestCase):
         # The first post in the list should be the newest one
         self.assertEqual(results[0]['id'], str(self.newest_post_from_followed.id))
         self.assertEqual(results[1]['id'], str(self.post_from_followed.id))
+
+    def test_soon_endpoint_returns_seven_to_fourteen_day_events(self):
+        """
+        Verify that the /feeds/soon/ endpoint returns only events between 7 and 14 days from now.
+        """
+        response = self.client.post(self.soon_url, {
+            'category': EventCategory.SPORTS,
+            'anywhere': 'true'
+        }, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        feed = response.data.get('response', {}).get('feed', {})
+        elements = feed.get('elements', [])
+        event_ids = [item.get('id') for item in elements if item.get('objectType') == 'event']
+
+        self.assertIn(str(self.soon_event.id), event_ids)
+        self.assertNotIn(str(self.outside_event.id), event_ids)
+        self.assertTrue(all(item.get('objectType') == 'event' for item in elements))
 
     # Note: A test for pagination would require knowing the specific implementation
     # (e.g., CursorPagination). If you provide the FeedViewSet code, I can add

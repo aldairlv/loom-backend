@@ -1,19 +1,29 @@
 # posts/views.py
 import time
 import uuid
+from datetime import timedelta
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.permissions import AllowAny
+from rest_framework.pagination import CursorPagination
+from django.utils import timezone
 from drf_spectacular.utils import extend_schema
 from .models import PendingFeedItem
 from .services import FeedService
 from .serializers import FeedResponseSerializer
+from events.services import EventService
+
+
+class FeedCursorPagination(CursorPagination):
+    page_size = 10
+    ordering = 'start_time'
 
 
 class FeedViewSet(viewsets.ViewSet):
     permission_classes = [AllowAny]
     page_size = 10
+    pagination_class = FeedCursorPagination
 
     @extend_schema(
         summary="Retrieve 'For You' feed",
@@ -124,5 +134,57 @@ class FeedViewSet(viewsets.ViewSet):
 
         # 6. Pasamos la página de posts al serializador global
         serializer = FeedResponseSerializer(feed_elements, context=context)
+
+        return Response(serializer.data)
+
+    @extend_schema(
+        summary="Retrieve upcoming events in 7-14 days",
+        responses=FeedResponseSerializer,
+    )
+    @action(detail=False, methods=['get', 'post'], url_path='soon')
+    def soon(self, request):
+        # Allow search criteria through both query params and request body.
+        params = request.query_params.copy()
+        if request.data:
+            params.update(request.data)
+
+        user_profile = None
+        if request.user.is_authenticated:
+            try:
+                user_profile = request.user.profile
+            except Exception:
+                user_profile = None
+
+        today = timezone.now().date()
+        params['start_date'] = (today + timedelta(days=2)).isoformat()
+        params['end_date'] = (today + timedelta(days=14)).isoformat()
+
+        if not params.get('lat') and not params.get('lng') and not params.get('anywhere'):
+            # If no location is provided and the user has no profile location, allow anywhere search.
+            if not (user_profile and user_profile.location):
+                params['anywhere'] = 'true'
+
+        queryset = EventService.filter_events(params, user_profile)
+        queryset = queryset.prefetch_related('attendees', 'tags', 'assets')
+
+        paginator = self.pagination_class()
+        page = paginator.paginate_queryset(queryset, request, view=self)
+        items = page if page is not None else list(queryset)
+
+        next_link = paginator.get_next_link()
+        next_cursor = None
+        if next_link:
+            next_cursor = next_link.split('cursor=')[-1]
+
+        stream_session_id = uuid.uuid4().hex
+        serializer = FeedResponseSerializer(
+            items,
+            context={
+                'request': request,
+                'session_id': stream_session_id,
+                'cursor': next_cursor,
+                'start_position': 1,
+            }
+        )
 
         return Response(serializer.data)

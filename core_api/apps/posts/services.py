@@ -3,48 +3,14 @@ from .models import Post, PostContent
 
 
 def build_post_trail(post):
-    """Construye el trail de ancestros desde el post más antiguo hasta el padre directo."""
-    if not post.parent_id:
+    """Construye el trail a partir de los IDs congelados en el post."""
+    if not post.trail_ids:
         return []
 
-    ancestor_ids = []
-    if connection.vendor == 'postgresql':
-        with connection.cursor() as cursor:
-            cursor.execute(
-                """
-                WITH RECURSIVE ancestors AS (
-                    SELECT id, parent_id, 0 AS level
-                    FROM posts_post
-                    WHERE id = %s
-                  UNION ALL
-                    SELECT p.id, p.parent_id, a.level + 1
-                    FROM posts_post p
-                    JOIN ancestors a ON p.id = a.parent_id
-                )
-                SELECT id
-                FROM ancestors
-                WHERE id != %s
-                ORDER BY level DESC
-                """,
-                [post.id, post.id],
-            )
-            ancestor_ids = [row[0] for row in cursor.fetchall()]
-
-    if not ancestor_ids:
-        current = post.parent
-        while current:
-            ancestor_ids.append(current.id)
-            current = current.parent
-        ancestor_ids.reverse()
-
-    if not ancestor_ids:
-        return []
-
-    queryset = Post.objects.filter(id__in=ancestor_ids).select_related('author').prefetch_related('contents')
-    posts_by_id = {post.id: post for post in queryset}
-    ordered_posts = [posts_by_id[post_id] for post_id in ancestor_ids if post_id in posts_by_id]
-    trail_posts = [ancestor for ancestor in ordered_posts if ancestor.contents.exists()]
-    return trail_posts
+    order_map = {post_id: index for index, post_id in enumerate(post.trail_ids)}
+    posts = Post.objects.filter(id__in=post.trail_ids).select_related('author').prefetch_related('contents__media')
+    ordered_posts = sorted(posts, key=lambda post_obj: order_map.get(post_obj.id, 0))
+    return ordered_posts
 
 
 def create_post(author, data, contents_data=None):

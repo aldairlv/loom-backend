@@ -1,6 +1,8 @@
 # posts/serializers.py
 from rest_framework import serializers
 from posts.models import Post
+from events.models import Event
+from events.nested_serializers import EventFeedSerializer
 # Importamos el PostSerializer principal para reutilizar su estructura
 from posts.serializers import PostSerializer
 from profiles.serializers import ProfileSerializer
@@ -44,6 +46,32 @@ class FeedPostWrapperSerializer(serializers.Serializer):
 
         return polymorphic_data
 
+
+class FeedEventWrapperSerializer(serializers.Serializer):
+    """
+    Serializador envoltorio para elementos de tipo event en el feed.
+    """
+    def to_representation(self, instance):
+        if isinstance(instance, dict):
+            event_data = instance
+        else:
+            event_data = EventFeedSerializer(instance, context=self.context).data
+
+        polymorphic_data = {
+            "objectType": "event",
+            "streamGlobalPosition": self.context.get('position', 0),
+            "streamSessionId": self.context.get('session_id', '')
+        }
+
+        if isinstance(event_data, dict):
+            polymorphic_data.update(event_data)
+        else:
+            polymorphic_data.update({
+                "id": str(instance.id),
+            })
+
+        polymorphic_data['id'] = str(polymorphic_data.get('id', instance.id))
+        return polymorphic_data
 
 
 # ==========================================
@@ -196,6 +224,10 @@ class FeedResponseSerializer(serializers.Serializer):
             # Condición de renderizado polimórfico
             if isinstance(item, Post):
                 serializer = FeedPostWrapperSerializer(item, context=context)
+                elements_data.append(serializer.data)
+
+            elif isinstance(item, Event):
+                serializer = FeedEventWrapperSerializer(item, context=context)
                 elements_data.append(serializer.data)
                 
             elif isinstance(item, dict) and item.get('virtual_type') == 'title':

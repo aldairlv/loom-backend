@@ -8,11 +8,14 @@ from rest_framework.pagination import CursorPagination
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.db.models import Q
+from django.contrib.gis.geos import Point
+from django.contrib.gis.db.models.functions import Distance
+from django.contrib.gis.measure import D
 from drf_spectacular.utils import extend_schema, OpenApiParameter
 
 from profiles.models import Profile
-from .models import Event
-from .serializers import EventSerializer
+from .models import Event, EventReview
+from .serializers import EventSerializer, EventReviewSerializer
 from .nested_serializers import EventFeedSerializer
 from . import services
 
@@ -163,16 +166,29 @@ class EventViewSet(viewsets.ModelViewSet):
 
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
+        
+        # Calcular la distancia para el usuario autenticado
+        user_profile = None
+        if request.user.is_authenticated:
+            try:
+                user_profile = request.user.profile
+            except Profile.DoesNotExist:
+                user_profile = None
+        
+        if user_profile and user_profile.location and instance.location:
+            # Anotar la instancia con la distancia calculada
+            ref_point = user_profile.location
+            # Usar QuerySet para calcular la distancia correctamente
+            annotated_instance = Event.objects.filter(pk=instance.pk).annotate(
+                distance=Distance('location', ref_point)
+            ).first()
+            if annotated_instance:
+                instance = annotated_instance
+        
         serializer = self.get_serializer(instance)
-        # For a single object, we can wrap it in the desired structure as well
         return Response({
             "meta": {"status": 200, "msg": "OK"},
-            "response": {
-                "feed": {
-                    "elements": [serializer.data],
-                    "queryParams": {} # Can be populated if needed
-                }
-            }
+            "response": serializer.data
         })
 
 
@@ -226,3 +242,45 @@ class EventViewSet(viewsets.ModelViewSet):
                 "rsvp_count": event.rsvp_count
             }
         }, status=status.HTTP_200_OK)
+
+    @extend_schema(
+        request=EventReviewSerializer,
+        responses={
+            200: EventReviewSerializer(many=True),
+            201: EventReviewSerializer,
+            400: None,
+        },
+        description='Obtener las reseñas de un evento (GET) o crear/actualizar la reseña del usuario autenticado para este evento (POST).'
+    )
+    @action(detail=True, methods=['get', 'post'], permission_classes=[IsAuthenticatedOrReadOnly])
+    def reviews(self, request, pk=None):
+        event = self.get_object()
+
+        if request.method == 'GET':
+            reviews = event.reviews.select_related('user').all()
+            serializer = EventReviewSerializer(reviews, many=True, context=self.get_serializer_context())
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
+        if not request.user.is_authenticated:
+            raise PermissionDenied("Authentication required to submit a review.")
+
+        try:
+            profile = request.user.profile
+        except Profile.DoesNotExist:
+            return Response(
+                {"error": "El usuario no tiene un perfil para realizar esta acción."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        serializer = EventReviewSerializer(data=request.data, context=self.get_serializer_context())
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        review, created = EventReview.objects.update_or_create(
+            event=event,
+            user=profile,
+            defaults=serializer.validated_data
+        )
+
+        response_serializer = EventReviewSerializer(review, context=self.get_serializer_context())
+        return Response(response_serializer.data, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)

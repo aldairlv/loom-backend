@@ -219,6 +219,9 @@ postgres_data/
 # --- Variables de Entorno ---
 .env
 
+# --- Firebase (credenciales de servicio) ---
+core_api/config/firebase-credentials.json
+
 # --- Sistema y IDEs ---
 .DS_Store
 .vscode/

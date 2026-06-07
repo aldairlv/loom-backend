@@ -60,6 +60,7 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - REDIS_URL=redis://redis:6379/0
+      - FIREBASE_CREDENTIALS_PATH=/app/config/firebase-credentials.json
     depends_on:
       db:
         condition: service_healthy
@@ -121,6 +122,7 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/0
       - REDIS_URL=redis://redis:6379/0
+      - FIREBASE_CREDENTIALS_PATH=/app/config/firebase-credentials.json
     depends_on:
       db:
         condition: service_healthy

@@ -53,6 +53,7 @@ INSTALLED_APPS = [
     "notifications",
     "chats",
     "searches",
+    'django_opensearch_dsl',
     'channels',
     'drf_spectacular', # Añade esto
     'django_celery_beat',
@@ -366,3 +367,15 @@ if FIREBASE_CREDENTIALS:
 # Tiempo de expiración de la conexión WebSocket (segundos)
 WEBSOCKET_ACCEPT_ALL = False  # Requiere autenticación
 WEBSOCKET_CONNECT_TIMEOUT = 5
+
+# ============================================
+# OPENSEARCH (búsqueda global en Explore)
+# ============================================
+OPENSEARCH_DSL = {
+    'default': {
+        'hosts': os.environ.get('OPENSEARCH_URL', 'http://opensearch:9200'),
+        'timeout': 30,
+        'retry_on_timeout': True,
+        'max_retries': 2,
+    },
+}

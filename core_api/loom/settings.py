@@ -52,7 +52,7 @@ INSTALLED_APPS = [
     "feeds",
     "notifications",
     "chats",
-    "searches"
+    "searches",
     'channels',
     'drf_spectacular', # Añade esto
     'django_celery_beat',

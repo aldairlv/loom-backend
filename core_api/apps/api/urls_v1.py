@@ -18,6 +18,7 @@ urlpatterns = [
     path('events/', include('events.urls')), # Nueva ruta para eventos
     path('relationships/', include('relationships.urls')),
     path('notifications/', include('notifications.urls')),
+    path('chats/', include('chats.urls')),
 
     # NEW SEMANTIC ENDPOINTS (Better UX than /relationships/...)
     path('me/followers/', MeFollowersView.as_view(), name='api-me-followers'),

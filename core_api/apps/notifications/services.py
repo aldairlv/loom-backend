@@ -294,6 +294,20 @@ class NotificationService:
                     'action': 'open_post',
                 }
             },
+            'message': {
+                'title': notification_data.get('sender_name', 'Nuevo mensaje'),
+                'body': (
+                    notification_data.get('message', {}).get('content', 'Tienes un mensaje nuevo')[:100]
+                ),
+                'data': {
+                    'type': 'message',
+                    'event': 'new_message',
+                    'conversation_id': str(notification_data.get('conversation_id', '')),
+                    'message_id': str(notification_data.get('message_id', '')),
+                    'sender_id': str(notification_data.get('sender_id', '')),
+                    'action': 'open_chat',
+                },
+            },
         }
 
         default_payload = {

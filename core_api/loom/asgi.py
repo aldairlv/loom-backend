@@ -18,14 +18,15 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'loom.settings')
 django.setup()
 
 # Import routing after django.setup()
-from notifications.routing import websocket_urlpatterns
+from notifications.routing import websocket_urlpatterns as notification_ws
+from chats.routing import websocket_urlpatterns as chat_ws
 from notifications.middleware import JwtAuthMiddleware
 
 application = ProtocolTypeRouter({
     'http': get_asgi_application(),
     'websocket': JwtAuthMiddleware(
         URLRouter(
-            websocket_urlpatterns
+            notification_ws + chat_ws
         )
     ),
 })
